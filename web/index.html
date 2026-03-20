@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Quantix 连接器</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <h1>Quantix 连接器</h1>
+    <small id="backend-info">后端地址：<span id="backend-url"></span></small>
+  </div>
+  <div id="tabs" aria-label="功能菜单">
+    <button class="tab-btn active" data-tab="dashboard">实时看板</button>
+    <button class="tab-btn" data-tab="devices">设备管理</button>
+    <button class="tab-btn" data-tab="control">手动控制</button>
+    <button class="tab-btn" data-tab="device-debug">设备调试</button>
+    <button class="tab-btn" data-tab="protocols">协议模板</button>
+    <button class="tab-btn" data-tab="serial-debug">串口调试</button>
+  </div>
+</header>
+
+<main>
+  <section class="page active" id="page-dashboard">
+    <div class="panel">
+      <h3>实时看板</h3>
+      <small id="ws-status"></small>
+      <div id="dashboard-error" class="err"></div>
+      <div id="dashboard-metrics" class="diag"></div>
+    </div>
+    <div id="dashboard-cards" class="cards"></div>
+  </section>
+
+  <section class="page" id="page-devices">
+    <div class="panel"><h3>设备列表</h3><div id="devices-error" class="err"></div><div id="devices-table"></div></div>
+    <div class="panel">
+      <h3>新建设备</h3>
+      <div class="grid-2">
+        <div><label>设备名称</label><input id="new-device-name" /></div>
+        <div><label>设备编码</label><input id="new-device-code" /></div>
+        <div><label>设备分类</label><select id="new-device-category"><option value="weight">称重(weight)</option><option value="printer_tsc">打印(printer_tsc)</option><option value="scanner">扫码(scanner)</option><option value="serial_board">看板(serial_board)</option></select></div>
+        <div><label>协议模板</label><select id="new-device-protocol"></select></div>
+        <div><label>轮询周期(秒)</label><input id="new-device-poll" type="number" value="1" step="0.1"/></div>
+        <div><label>是否启用</label><select id="new-device-enabled"><option value="true">是(true)</option><option value="false">否(false)</option></select></div>
+      </div>
+      <div class="grid-2">
+        <div><label>连接参数(JSON)</label><textarea id="new-device-conn" rows="7">{"host":"127.0.0.1","port":502}</textarea></div>
+        <div><label>模板变量(JSON)</label><textarea id="new-device-vars" rows="7">{"slave_id":1,"address":0}</textarea></div>
+      </div>
+      <div class="row"><button class="btn-pri" id="create-device-btn">创建</button><span id="create-device-result"></span></div>
+    </div>
+    <div class="panel">
+      <h3>编辑设备</h3>
+      <div class="grid-2">
+        <div><label>选择设备</label><select id="edit-device-id"><option value="">请选择设备</option></select></div>
+        <div><label>协议模板</label><select id="edit-device-protocol"></select></div>
+        <div><label>设备名称</label><input id="edit-device-name" /></div>
+        <div><label>设备编码</label><input id="edit-device-code" /></div>
+        <div><label>设备分类</label><select id="edit-device-category"><option value="weight">称重(weight)</option><option value="printer_tsc">打印(printer_tsc)</option><option value="scanner">扫码(scanner)</option><option value="serial_board">看板(serial_board)</option></select></div>
+        <div><label>轮询周期(秒)</label><input id="edit-device-poll" type="number" step="0.1"/></div>
+        <div><label>是否启用</label><select id="edit-device-enabled"><option value="true">是(true)</option><option value="false">否(false)</option></select></div>
+      </div>
+      <div class="grid-2">
+        <div><label>连接参数(JSON)</label><textarea id="edit-device-conn" rows="7">{}</textarea></div>
+        <div><label>模板变量(JSON)</label><textarea id="edit-device-vars" rows="7">{}</textarea></div>
+      </div>
+      <div class="row">
+        <button class="btn-pri" id="update-device-btn">保存修改</button>
+        <button id="test-device-connection-btn" class="btn-sec">测试连接</button>
+        <span id="update-device-result"></span>
+      </div>
+      <div class="row"><span id="test-device-connection-result"></span></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-control">
+    <div class="panel">
+      <h3>手动控制</h3>
+      <div class="grid-2">
+        <div><label>设备</label><select id="control-device"></select></div>
+        <div><label>步骤 ID</label><select id="control-step"></select></div>
+      </div>
+      <label>参数(JSON)</label><textarea id="control-params" rows="5">{}</textarea>
+      <div class="row">
+        <button id="control-tare" class="btn-sec">去皮</button>
+        <button id="control-zero" class="btn-sec">清零</button>
+        <button id="control-run" class="btn-pri">执行</button>
+      </div>
+      <div id="control-result"></div>
+      <pre id="control-detail"></pre>
+    </div>
+  </section>
+
+  <section class="page" id="page-device-debug">
+    <div class="panel">
+      <h3>设备调试</h3>
+      <div class="grid-2">
+        <div><label>设备</label><select id="debug-device"></select></div>
+        <div><label>操作</label><select id="debug-action"><option value="print">打印</option><option value="scanner_last">扫码结果</option><option value="board_status">看板状态</option></select></div>
+      </div>
+      <label>参数(JSON)</label><textarea id="debug-params" rows="4">{"print_data":"SIZE 40 mm,30 mm\nTEXT 20,20,\"3\",0,1,1,\"TEST\"\nPRINT 1\n"}</textarea>
+      <button id="debug-run" class="btn-pri">执行</button>
+      <div id="debug-result"></div>
+      <h4>运行时快照</h4><pre id="debug-runtime">{}</pre>
+      <h4>操作结果</h4><pre id="debug-action-result">{}</pre>
+    </div>
+  </section>
+
+  <section class="page" id="page-protocols">
+    <div class="panel"><h3>协议模板列表</h3><div id="protocols-list"></div><div id="protocols-error" class="err"></div></div>
+    <div class="panel">
+      <h3>新建协议模板</h3>
+      <div class="grid-2">
+        <div><label>名称</label><input id="new-protocol-name" /></div>
+        <div><label>协议类型</label><select id="new-protocol-type"><option>modbus_tcp</option><option>modbus_rtu</option><option>mqtt</option><option>serial</option><option>tcp</option></select></div>
+      </div>
+      <label>描述</label><input id="new-protocol-desc" />
+      <label>模板 JSON</label><textarea id="new-protocol-template" rows="12">{}</textarea>
+      <div class="row"><button id="create-protocol-btn" class="btn-pri">创建</button><span id="create-protocol-result"></span></div>
+    </div>
+    <div class="panel">
+      <h3>编辑 / 删除协议模板</h3>
+      <div class="grid-2">
+        <div><label>协议</label><select id="edit-protocol-id"></select></div>
+        <div><label>类型</label><input id="edit-protocol-type" /></div>
+      </div>
+      <label>名称</label><input id="edit-protocol-name" />
+      <label>描述</label><input id="edit-protocol-desc" />
+      <label>模板 JSON</label><textarea id="edit-protocol-template" rows="12">{}</textarea>
+      <div class="row"><button id="update-protocol-btn" class="btn-pri">更新</button><button id="delete-protocol-btn">删除</button><span id="edit-protocol-result"></span></div>
+    </div>
+    <div class="panel">
+      <h3>单步测试</h3>
+      <div class="grid-3">
+        <div><label>协议</label><select id="step-test-protocol"></select></div>
+        <div><label>上下文</label><select id="step-test-context"><option value="poll">轮询(poll)</option><option value="setup">初始化(setup)</option><option value="event">事件(event)</option></select></div>
+        <div><label>步骤 ID</label><input id="step-test-id"/></div>
+      </div>
+      <div class="grid-2">
+        <div><label>连接参数(JSON)</label><textarea id="step-test-conn" rows="6">{}</textarea></div>
+        <div><label>模板变量(JSON)</label><textarea id="step-test-vars" rows="6">{}</textarea></div>
+      </div>
+      <label>事件测试载荷</label><textarea id="step-test-payload" rows="3"></textarea>
+      <label><input id="step-test-allow-write" type="checkbox" style="width:auto"/> 允许写操作(allow_write)</label>
+      <button id="step-test-btn" class="btn-pri">执行测试</button>
+      <pre id="step-test-result">{}</pre>
+    </div>
+  </section>
+
+  <section class="page" id="page-serial-debug">
+    <div class="panel">
+      <h3>串口调试</h3>
+      <div class="grid-3">
+        <div><label>端口</label><select id="serial-port"></select></div>
+        <div><label>波特率</label><input id="serial-baud" type="number" value="9600" /></div>
+        <div><label>数据位</label><input id="serial-bytesize" type="number" value="8" /></div>
+        <div><label>校验位</label><select id="serial-parity"><option>N</option><option>E</option><option>O</option></select></div>
+        <div><label>停止位</label><input id="serial-stopbits" type="number" value="1" step="0.5"/></div>
+        <div><label>超时(ms)</label><input id="serial-timeout" type="number" value="300" /></div>
+      </div>
+      <div class="row"><button id="serial-refresh">刷新端口</button><button id="serial-open" class="btn-pri">打开</button><button id="serial-close">关闭</button></div>
+      <div id="serial-status"></div>
+      <h4>发送</h4>
+      <div class="grid-3">
+        <div><label>格式</label><select id="serial-data-format"><option value="text">文本(text)</option><option value="hex">十六进制(hex)</option></select></div>
+        <div><label>编码</label><select id="serial-encoding"><option>utf-8</option><option>ascii</option></select></div>
+        <div><label>行尾</label><select id="serial-line-ending"><option value="none">无(none)</option><option value="cr">回车(cr)</option><option value="lf">换行(lf)</option><option value="crlf">回车换行(crlf)</option></select></div>
+      </div>
+      <textarea id="serial-send-data" rows="4"></textarea>
+      <div class="row"><button id="serial-send" class="btn-sec">发送</button><span id="serial-send-result"></span></div>
+      <h4>日志</h4>
+      <div class="row"><button id="serial-clear">清空日志</button></div>
+      <pre id="serial-log">暂无日志</pre>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
