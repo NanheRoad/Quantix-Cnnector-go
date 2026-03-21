@@ -155,6 +155,143 @@ select {
 }
 
 textarea { line-height: 1.45; }
+.json-editor-wrap {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel-soft);
+}
+
+.json-editor-main {
+  position: relative;
+  overflow: hidden;
+}
+
+.json-gutter {
+  background: #eef3ff;
+  border-right: 1px solid var(--line);
+}
+
+.json-gutter-inner {
+  padding: 9px 8px;
+  font-family: "JetBrains Mono", "SFMono-Regular", "Consolas", "Menlo", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #6c7b98;
+  transform: translateY(0);
+}
+
+.json-gutter-line {
+  height: 1.45em;
+  text-align: right;
+  padding-right: 4px;
+}
+
+.json-gutter-line.err {
+  color: #a31d2a;
+  background: rgba(180, 35, 44, 0.12);
+  border-radius: 4px;
+}
+
+#new-protocol-template,
+#edit-protocol-template {
+  min-height: 280px;
+  font-family: "JetBrains Mono", "SFMono-Regular", "Consolas", "Menlo", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.json-editor-input {
+  position: relative;
+  z-index: 2;
+  color: transparent;
+  caret-color: #10203d;
+  text-shadow: 0 0 0 transparent;
+  -webkit-text-fill-color: transparent;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  resize: vertical;
+  background: transparent;
+}
+
+.json-editor-input::selection {
+  background: rgba(51, 117, 255, 0.25);
+}
+
+.json-editor-syntax {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  margin: 0;
+  padding: 9px 10px;
+  border: 0;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font-family: "JetBrains Mono", "SFMono-Regular", "Consolas", "Menlo", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #10203d;
+  transform: translateY(0);
+}
+
+.json-token-key { color: #0b62b8; }
+.json-token-string { color: #0d8f5f; }
+.json-token-number { color: #7b4bd1; }
+.json-token-bool { color: #b25f00; font-weight: 600; }
+.json-token-null { color: #8a3d4b; font-style: italic; }
+.json-token-punc { color: #5d6d8b; }
+.json-token-invalid { color: #b4232c; background: rgba(180, 35, 44, 0.08); border-radius: 3px; }
+
+.json-editor-wrap:focus-within .json-editor-syntax {
+  box-shadow: inset 0 0 0 1px #7fa6e6;
+}
+
+.json-editor-input:focus {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px #7fa6e6;
+}
+
+.editor-status {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #f7faff;
+  font-size: 12px;
+  color: #2f4b78;
+}
+
+.editor-status.ok {
+  border-color: #8bd7ba;
+  background: #eefcf5;
+  color: #1d694d;
+}
+
+.editor-status.err {
+  border-color: #efb6bc;
+  background: #fff2f4;
+  color: #9f1f2a;
+}
+
+.editor-errors {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.editor-errors li {
+  margin: 4px 0;
+  color: var(--err);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.editor-errors li.warn {
+  color: #8a6300;
+}
 
 input:focus,
 textarea:focus,

@@ -1,7 +1,7 @@
 # 旧项目设备模板全集（文档内联版）
 
 来源目录：`/Users/n/Code/Quantix-Cnnector/docs`
-整理日期：2026-03-20
+整理日期：2026-03-21
 
 说明：以下模板已全部内联在本文档中，不依赖单独 JSON 文件。
 
@@ -390,10 +390,6 @@
         "input": "${steps.receive_poll_raw.result.payload}",
         "pattern": "${weight_pattern}",
         "group": 2
-      },
-      "parse": {
-        "type": "expression",
-        "expression": "payload.strip()"
       }
     },
     {
@@ -623,7 +619,7 @@
       },
       "parse": {
         "type": "expression",
-        "expression": "((registers[0] * 65536 + registers[1]) - (4294967296 if (registers[0] * 65536 + registers[1]) >= 2147483648 else 0)) / scale"
+        "expression": "((registers[0] * 65536 + registers[1]) - ((registers[0] * 65536 + registers[1]) >= 2147483648 ? 4294967296 : 0)) / scale"
       }
     },
     {
@@ -731,10 +727,12 @@
 
 ## 兼容性提示（当前 Go 执行器）
 
-- 第 6 个模板含 `payload.strip()` 表达式，建议改为纯正则提取或直接输出 `${steps.parse_unit.result}` 不再做 `strip()`。
-- 第 11 个模板含 Python 三元表达式 `a if cond else b`，建议改为 Go 执行器可识别表达式后再上线。
+- 第 6 个模板已移除 `payload.strip()`，直接使用正则分组提取单位。
+- 第 11 个模板已改为 `expr` 兼容的 `?:` 条件表达式。
 
 ## 14. Modbus TCP 调试专用模板（新增）
+
+说明：该模板偏“联调读写”用途，重量解析为通用 `寄存器值 / scale`。若你需要和 `modbus_tcp_test_server.py` 严格对齐（有符号 32 位 + `/1000` + 可配小数位/单位），请使用第 15 节模板。
 
 ```json
 {
@@ -827,6 +825,69 @@
     "weight": "${steps.poll_weight.result}",
     "unit": "kg",
     "poll_registers": "${steps.poll_read_input.result.registers}"
+  }
+}
+```
+
+## 15. Modbus TCP（/1000 + 小数位可配置）模板（新增）
+
+```json
+{
+  "name": "Modbus TCP 测试（/1000 可配小数位）",
+  "description": "读取2个输入寄存器组成32位有符号值，按 scale 缩放；单位与小数位可配置",
+  "protocol_type": "modbus_tcp",
+  "variables": [
+    { "name": "slave_id", "type": "int", "default": 1, "label": "从站地址" },
+    { "name": "address", "type": "int", "default": 0, "label": "重量寄存器起始地址" },
+    { "name": "scale", "type": "float", "default": 1000, "label": "缩放系数（用于除法）" },
+    { "name": "unit", "type": "string", "default": "kg", "label": "显示单位" },
+    { "name": "decimals", "type": "int", "default": 2, "label": "显示小数位" },
+    { "name": "tare_control_addr", "type": "int", "default": 100, "label": "去皮控制地址" },
+    { "name": "zero_control_addr", "type": "int", "default": 101, "label": "清零控制地址" }
+  ],
+  "steps": [
+    {
+      "id": "read_weight",
+      "name": "读取净重(FC4)",
+      "trigger": "poll",
+      "action": "modbus.read_input_registers",
+      "params": {
+        "slave_id": "${slave_id}",
+        "address": "${address}",
+        "count": 2
+      },
+      "parse": {
+        "type": "expression",
+        "expression": "((registers[0] * 65536 + registers[1]) - ((registers[0] * 65536 + registers[1]) >= 2147483648 ? 4294967296 : 0)) / scale"
+      }
+    },
+    {
+      "id": "tare",
+      "name": "去皮",
+      "trigger": "manual",
+      "action": "modbus.write_register",
+      "params": {
+        "slave_id": "${slave_id}",
+        "address": "${tare_control_addr}",
+        "value": 1
+      }
+    },
+    {
+      "id": "zero",
+      "name": "清零",
+      "trigger": "manual",
+      "action": "modbus.write_register",
+      "params": {
+        "slave_id": "${slave_id}",
+        "address": "${zero_control_addr}",
+        "value": 1
+      }
+    }
+  ],
+  "output": {
+    "weight": "${steps.read_weight.result}",
+    "unit": "${unit}",
+    "decimals": "${decimals}"
   }
 }
 ```

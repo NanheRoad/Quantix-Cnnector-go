@@ -117,8 +117,21 @@
         <div><label>协议类型</label><select id="new-protocol-type"><option>modbus_tcp</option><option>modbus_rtu</option><option>mqtt</option><option>serial</option><option>tcp</option></select></div>
       </div>
       <label>描述</label><input id="new-protocol-desc" />
-      <label>模板 JSON</label><textarea id="new-protocol-template" rows="12">{}</textarea>
-      <div class="row"><button id="create-protocol-btn" class="btn-pri">创建</button><span id="create-protocol-result"></span></div>
+      <label>模板 JSON</label>
+      <div class="json-editor-wrap">
+        <div class="json-gutter"><div id="new-protocol-template-gutter" class="json-gutter-inner"></div></div>
+        <div class="json-editor-main">
+          <pre id="new-protocol-template-syntax" class="json-editor-syntax" aria-hidden="true"></pre>
+          <textarea id="new-protocol-template" class="json-editor-input" rows="12">{}</textarea>
+        </div>
+      </div>
+      <div id="new-protocol-template-status" class="editor-status">JSON 诊断：等待输入</div>
+      <ul id="new-protocol-template-errors" class="editor-errors"></ul>
+      <div class="row">
+        <button id="new-protocol-format-btn">格式化 JSON</button>
+        <button id="create-protocol-btn" class="btn-pri">创建</button>
+        <span id="create-protocol-result"></span>
+      </div>
     </div>
     <div class="panel">
       <h3>编辑 / 删除协议模板</h3>
@@ -128,8 +141,22 @@
       </div>
       <label>名称</label><input id="edit-protocol-name" />
       <label>描述</label><input id="edit-protocol-desc" />
-      <label>模板 JSON</label><textarea id="edit-protocol-template" rows="12">{}</textarea>
-      <div class="row"><button id="update-protocol-btn" class="btn-pri">更新</button><button id="delete-protocol-btn">删除</button><span id="edit-protocol-result"></span></div>
+      <label>模板 JSON</label>
+      <div class="json-editor-wrap">
+        <div class="json-gutter"><div id="edit-protocol-template-gutter" class="json-gutter-inner"></div></div>
+        <div class="json-editor-main">
+          <pre id="edit-protocol-template-syntax" class="json-editor-syntax" aria-hidden="true"></pre>
+          <textarea id="edit-protocol-template" class="json-editor-input" rows="12">{}</textarea>
+        </div>
+      </div>
+      <div id="edit-protocol-template-status" class="editor-status">JSON 诊断：请选择协议</div>
+      <ul id="edit-protocol-template-errors" class="editor-errors"></ul>
+      <div class="row">
+        <button id="edit-protocol-format-btn">格式化 JSON</button>
+        <button id="update-protocol-btn" class="btn-pri">更新</button>
+        <button id="delete-protocol-btn">删除</button>
+        <span id="edit-protocol-result"></span>
+      </div>
     </div>
     <div class="panel">
       <h3>单步测试</h3>

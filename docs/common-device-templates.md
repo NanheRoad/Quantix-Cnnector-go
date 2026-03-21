@@ -1,12 +1,12 @@
 # Quantix Connector 常见设备模板清单
 
-更新时间：2026-03-20
+更新时间：2026-03-21
 
 本文基于旧仓库计划文档 `/Users/n/Code/Quantix-Cnnector/docs/plans/2026-03-09-serial-printer-scanner-board-implementation-plan.md`，并结合当前 Go 项目种子模板（`internal/store/seed.go`）整理。
 
 旧项目文档模板全集（文档内联版）见：
 
-- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/plan/legacy-device-templates-full.md)
+- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)
 
 ## 1. 标准 Modbus TCP 称重模板
 
@@ -244,7 +244,7 @@
 
 模板全文见：
 
-- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/plan/legacy-device-templates-full.md)（第 5 节）
+- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)（第 5 节）
 
 ## 9. 奥豪斯 Navigator 模板
 
@@ -269,7 +269,7 @@
 
 模板全文见：
 
-- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/plan/legacy-device-templates-full.md)（第 6 节）
+- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)（第 6 节）
 
 ## 10. Modbus TCP 调试专用模板
 
@@ -281,4 +281,17 @@
 
 模板全文见：
 
-- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/plan/legacy-device-templates-full.md)（第 14 节）
+- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)（第 14 节）
+
+## 11. Modbus TCP（/1000 + 小数位可配置）模板
+
+适用说明：
+
+- 适配 `tools/modbus_tcp_test_server.py` 的 32 位有符号重量寄存器（2 个输入寄存器）
+- 重量换算使用“除以 1000”（原始值 `1000` 显示为 `1`）
+- 显示小数位由模板变量 `decimals` 控制（前端按 `output.decimals` 渲染）
+- 重量单位由模板变量 `unit` 控制（前端按 `output.unit` 渲染）
+
+模板全文见：
+
+- [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)（第 15 节）

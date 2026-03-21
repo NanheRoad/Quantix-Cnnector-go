@@ -12,6 +12,10 @@ const state = {
   controlManualSteps: [],
   serialSeq: 0,
   serialLogs: [],
+  protocolEditors: {
+    new: { syncingFromTemplate: false, syncingFromFields: false, lastAnalysis: null, highlightLine: null, lineCount: 0 },
+    edit: { syncingFromTemplate: false, syncingFromFields: false, lastAnalysis: null, highlightLine: null, lineCount: 0 },
+  },
 };
 
 const STATUS_TEXT = {
@@ -36,6 +40,10 @@ const PROTOCOL_DESC_TEXT = {
   'Serial scanner line mode': '串口扫码枪行模式模板',
   'Serial board polling template': '串口看板轮询模板',
 };
+
+const ALLOWED_PROTOCOL_TYPES = new Set(['modbus_tcp', 'modbus_rtu', 'mqtt', 'serial', 'tcp', 'modbus']);
+const ALLOWED_TRIGGERS = new Set(['poll', 'manual', 'setup', 'event']);
+const ALLOWED_PARSE_TYPES = new Set(['expression', 'regex', 'substring', 'struct']);
 
 function el(id) { return document.getElementById(id); }
 function pretty(v) { return JSON.stringify(v, null, 2); }
@@ -63,12 +71,452 @@ function safeParseJSON(text, fallback) {
   }
 }
 
+function normalizeTemplateVarDefault(def) {
+  if (def === null || def === undefined) return '';
+  return def;
+}
+
+function buildTemplateDefaultVars(template) {
+  const vars = {};
+  const list = Array.isArray(template?.variables) ? template.variables : [];
+  list.forEach(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+    const name = String(item.name || '').trim();
+    if (!name) return;
+    vars[name] = normalizeTemplateVarDefault(item.default);
+  });
+  return vars;
+}
+
+function mergeTemplateVars(defaultVars, currentVars) {
+  const merged = { ...defaultVars };
+  if (!currentVars || typeof currentVars !== 'object' || Array.isArray(currentVars)) return merged;
+  Object.keys(currentVars).forEach(k => {
+    if (Object.prototype.hasOwnProperty.call(defaultVars, k)) {
+      merged[k] = currentVars[k];
+    }
+  });
+  return merged;
+}
+
+async function fetchProtocolTemplateByID(protocolID) {
+  const id = Number(protocolID || 0);
+  if (!id) return null;
+  const inList = state.protocols.find(p => Number(p.id) === id);
+  if (inList && inList.template && typeof inList.template === 'object') return inList.template;
+  const detail = await api(`/api/protocols/${id}`);
+  return detail?.template || null;
+}
+
+async function applyDeviceTemplateDefaults(kind) {
+  const selectID = kind === 'new' ? 'new-device-protocol' : 'edit-device-protocol';
+  const varsID = kind === 'new' ? 'new-device-vars' : 'edit-device-vars';
+  const resultID = kind === 'new' ? 'create-device-result' : 'update-device-result';
+  const protocolID = Number(el(selectID).value || 0);
+  if (!protocolID) return;
+  try {
+    const template = await fetchProtocolTemplateByID(protocolID);
+    const defaults = buildTemplateDefaultVars(template);
+    const current = safeParseJSON(el(varsID).value, {});
+    const merged = mergeTemplateVars(defaults, current);
+    el(varsID).value = pretty(merged);
+    el(resultID).textContent = '';
+  } catch (e) {
+    el(resultID).className = 'err';
+    el(resultID).textContent = `加载模板默认变量失败: ${e.message}`;
+  }
+}
+
 function parseJSONOrThrow(text, fieldName) {
   try {
     return JSON.parse(text || '');
   } catch (e) {
     throw new Error(`${fieldName} 不是合法 JSON: ${e.message}`);
   }
+}
+
+function formatWeightValue(value, decimals) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value ?? '--';
+  if (decimals == null) return `${n}`;
+  const d = Number(decimals);
+  if (!Number.isFinite(d)) return `${n}`;
+  const fixed = Math.max(0, Math.min(6, Math.trunc(d)));
+  return n.toFixed(fixed);
+}
+
+function resolveWeightDecimals(rt) {
+  if (!rt || typeof rt !== 'object') return null;
+  const direct = rt.decimals;
+  if (Number.isFinite(Number(direct))) return Number(direct);
+  const payload = rt.payload || {};
+  if (Number.isFinite(Number(payload.decimals))) return Number(payload.decimals);
+  return null;
+}
+
+function protocolFieldRefs(kind) {
+  return {
+    name: el(`${kind}-protocol-name`),
+    desc: el(`${kind}-protocol-desc`),
+    type: el(`${kind}-protocol-type`),
+    template: el(`${kind}-protocol-template`),
+    syntax: el(`${kind}-protocol-template-syntax`),
+    gutter: el(`${kind}-protocol-template-gutter`),
+    status: el(`${kind}-protocol-template-status`),
+    errors: el(`${kind}-protocol-template-errors`),
+  };
+}
+
+function escapeHTML(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function highlightJSON(text) {
+  const src = String(text ?? '');
+  if (!src) return ' ';
+  const tokenRe = /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?|[{}\[\],:])/g;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = tokenRe.exec(src)) !== null) {
+    const idx = m.index;
+    if (idx > last) out += escapeHTML(src.slice(last, idx));
+    const token = m[0];
+    let cls = 'json-token-invalid';
+    if (token[0] === '"') cls = m[2] ? 'json-token-key' : 'json-token-string';
+    else if (token === 'true' || token === 'false') cls = 'json-token-bool';
+    else if (token === 'null') cls = 'json-token-null';
+    else if (/^-?\d/.test(token)) cls = 'json-token-number';
+    else cls = 'json-token-punc';
+    out += `<span class="${cls}">${escapeHTML(token)}</span>`;
+    last = idx + token.length;
+  }
+  if (last < src.length) out += escapeHTML(src.slice(last));
+  return out;
+}
+
+function posToLineCol(text, pos) {
+  const safePos = Math.max(0, Math.min(Number(pos) || 0, text.length));
+  const lines = text.slice(0, safePos).split('\n');
+  return { line: lines.length, col: lines[lines.length - 1].length + 1 };
+}
+
+function lineColToPos(text, line, col) {
+  const rows = text.split('\n');
+  const targetLine = Math.max(1, Math.min(Number(line) || 1, rows.length));
+  const targetCol = Math.max(1, Number(col) || 1);
+  let idx = 0;
+  for (let i = 1; i < targetLine; i += 1) idx += rows[i - 1].length + 1;
+  idx += Math.min(targetCol - 1, rows[targetLine - 1].length);
+  return idx;
+}
+
+function focusEditorAt(textarea, line, col) {
+  const pos = lineColToPos(textarea.value, line, col);
+  textarea.focus();
+  textarea.setSelectionRange(pos, pos);
+}
+
+function parseJSONDetailed(text) {
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch (e) {
+    const msg = String(e?.message || 'JSON 语法错误');
+    let line = 1;
+    let col = 1;
+    let index = -1;
+    let m = msg.match(/position\s+(\d+)/i);
+    if (m) {
+      index = Number(m[1]);
+      const lc = posToLineCol(text, index);
+      line = lc.line;
+      col = lc.col;
+    } else {
+      m = msg.match(/line\s+(\d+)\s+column\s+(\d+)/i);
+      if (m) {
+        line = Number(m[1]);
+        col = Number(m[2]);
+      }
+    }
+    return { ok: false, error: { message: msg, line, col, index } };
+  }
+}
+
+function validateProtocolTemplate(template) {
+  const diagnostics = [];
+  if (!template || typeof template !== 'object' || Array.isArray(template)) {
+    diagnostics.push({ level: 'error', message: '模板 JSON 顶层必须是对象', path: '$' });
+    return diagnostics;
+  }
+  const protocolType = String(template.protocol_type || '').trim().toLowerCase();
+  if (!protocolType) {
+    diagnostics.push({ level: 'error', message: '缺少 protocol_type', path: '$.protocol_type' });
+  } else if (!ALLOWED_PROTOCOL_TYPES.has(protocolType)) {
+    diagnostics.push({ level: 'error', message: `protocol_type 不合法: ${protocolType}`, path: '$.protocol_type' });
+  }
+  const steps = Array.isArray(template.steps) ? template.steps : [];
+  const setupSteps = Array.isArray(template.setup_steps) ? template.setup_steps : [];
+  const messageHandler = template.message_handler;
+  if (steps.length === 0 && setupSteps.length === 0 && !messageHandler) {
+    diagnostics.push({ level: 'warn', message: '未配置 steps/setup_steps/message_handler，模板不会执行任何动作', path: '$' });
+  }
+  const idSet = new Set();
+  steps.forEach((step, i) => {
+    const path = `$.steps[${i}]`;
+    if (!step || typeof step !== 'object' || Array.isArray(step)) {
+      diagnostics.push({ level: 'error', message: '步骤必须是对象', path });
+      return;
+    }
+    const stepID = String(step.id || '').trim();
+    if (!stepID) {
+      diagnostics.push({ level: 'error', message: '步骤缺少 id', path: `${path}.id` });
+    } else if (idSet.has(stepID)) {
+      diagnostics.push({ level: 'error', message: `步骤 id 重复: ${stepID}`, path: `${path}.id` });
+    } else {
+      idSet.add(stepID);
+    }
+    const trigger = String(step.trigger || 'poll').trim().toLowerCase();
+    if (!ALLOWED_TRIGGERS.has(trigger)) {
+      diagnostics.push({ level: 'error', message: `trigger 不合法: ${trigger}`, path: `${path}.trigger` });
+    }
+    const action = String(step.action || '').trim();
+    if (!action) {
+      diagnostics.push({ level: 'error', message: '步骤缺少 action', path: `${path}.action` });
+    }
+    if (step.parse && typeof step.parse === 'object' && !Array.isArray(step.parse)) {
+      const parseType = String(step.parse.type || '').trim().toLowerCase();
+      if (!parseType || !ALLOWED_PARSE_TYPES.has(parseType)) {
+        diagnostics.push({ level: 'error', message: `parse.type 不支持: ${parseType || '-'}`, path: `${path}.parse.type` });
+      }
+    }
+    if (/^(modbus\.write|mqtt\.publish|serial\.send|tcp\.send)/.test(action) && trigger !== 'manual') {
+      diagnostics.push({ level: 'warn', message: `写操作建议使用 manual trigger: ${action}`, path: `${path}.trigger` });
+    }
+  });
+  if (protocolType === 'mqtt' && (!messageHandler || typeof messageHandler !== 'object')) {
+    diagnostics.push({ level: 'warn', message: 'MQTT 模板建议配置 message_handler 处理推送数据', path: '$.message_handler' });
+  }
+  return diagnostics;
+}
+
+function tryLocatePath(text, path) {
+  if (!path || path === '$') return null;
+  const keyMatch = path.match(/\.([a-zA-Z0-9_]+)$/);
+  if (!keyMatch) return null;
+  const needle = `"${keyMatch[1]}"`;
+  const idx = text.indexOf(needle);
+  if (idx < 0) return null;
+  return posToLineCol(text, idx);
+}
+
+function getEditorLineHeight(textarea) {
+  const lh = parseFloat(getComputedStyle(textarea).lineHeight);
+  return Number.isFinite(lh) && lh > 0 ? lh : 19;
+}
+
+function renderProtocolGutter(kind, highlightLine) {
+  const refs = protocolFieldRefs(kind);
+  const editorState = state.protocolEditors[kind];
+  const lineCount = Math.max(1, refs.template.value.split('\n').length);
+  if (editorState.lineCount !== lineCount) {
+    const nums = [];
+    for (let i = 1; i <= lineCount; i += 1) {
+      nums.push(`<div class="json-gutter-line${highlightLine === i ? ' err' : ''}" data-line="${i}">${i}</div>`);
+    }
+    refs.gutter.innerHTML = nums.join('');
+    editorState.lineCount = lineCount;
+  } else {
+    refs.gutter.querySelectorAll('.json-gutter-line').forEach(node => {
+      node.classList.toggle('err', Number(node.dataset.line) === highlightLine);
+    });
+  }
+  refs.gutter.style.transform = `translateY(${-refs.template.scrollTop}px)`;
+}
+
+function renderProtocolSyntax(kind) {
+  const refs = protocolFieldRefs(kind);
+  if (!refs.syntax) return;
+  refs.syntax.innerHTML = highlightJSON(refs.template.value || '');
+  refs.syntax.style.transform = `translateY(${-refs.template.scrollTop}px)`;
+}
+
+function renderProtocolTextareaHighlight(kind, highlightLine) {
+  const refs = protocolFieldRefs(kind);
+  const ta = refs.template;
+  if (!highlightLine) {
+    ta.style.backgroundImage = 'none';
+    return;
+  }
+  const styles = getComputedStyle(ta);
+  const lineHeight = getEditorLineHeight(ta);
+  const padTop = parseFloat(styles.paddingTop) || 0;
+  const top = padTop + (highlightLine - 1) * lineHeight - ta.scrollTop;
+  const bottom = top + lineHeight;
+  if (bottom < 0 || top > ta.clientHeight) {
+    ta.style.backgroundImage = 'none';
+    return;
+  }
+  const topPx = Math.max(0, top);
+  const bottomPx = Math.min(ta.clientHeight, bottom);
+  ta.style.backgroundImage = `linear-gradient(to bottom,
+    transparent 0,
+    transparent ${topPx}px,
+    rgba(180, 35, 44, 0.14) ${topPx}px,
+    rgba(180, 35, 44, 0.14) ${bottomPx}px,
+    transparent ${bottomPx}px
+  )`;
+  ta.style.backgroundRepeat = 'no-repeat';
+}
+
+function renderProtocolEditorVisual(kind, highlightLine) {
+  renderProtocolSyntax(kind);
+  renderProtocolGutter(kind, highlightLine);
+  renderProtocolTextareaHighlight(kind, highlightLine);
+}
+
+function renderProtocolDiagnostics(kind, analysis) {
+  const refs = protocolFieldRefs(kind);
+  const editorState = state.protocolEditors[kind];
+  refs.errors.innerHTML = '';
+  refs.status.className = 'editor-status';
+
+  const actionBtn = kind === 'new' ? el('create-protocol-btn') : el('update-protocol-btn');
+  let hasHardError = false;
+  let highlightLine = null;
+
+  if (!analysis.ok) {
+    hasHardError = true;
+    highlightLine = analysis.error.line || 1;
+    refs.status.classList.add('err');
+    refs.status.textContent = `JSON 语法错误（第 ${analysis.error.line} 行，第 ${analysis.error.col} 列）：${analysis.error.message}`;
+    const li = document.createElement('li');
+    li.textContent = `语法错误 @ ${analysis.error.line}:${analysis.error.col}`;
+    li.addEventListener('click', () => focusEditorAt(refs.template, analysis.error.line, analysis.error.col));
+    refs.errors.appendChild(li);
+  } else {
+    const diags = analysis.diagnostics || [];
+    const hardCount = diags.filter(d => d.level === 'error').length;
+    const warnCount = diags.filter(d => d.level === 'warn').length;
+    hasHardError = hardCount > 0;
+    if (hardCount > 0) {
+      refs.status.classList.add('err');
+      refs.status.textContent = `JSON 诊断：${hardCount} 个错误，${warnCount} 个警告`;
+    } else {
+      refs.status.classList.add('ok');
+      refs.status.textContent = `JSON 诊断：通过（${warnCount} 个警告）`;
+    }
+    diags.forEach(d => {
+      const li = document.createElement('li');
+      if (d.level === 'warn') li.className = 'warn';
+      const located = tryLocatePath(refs.template.value, d.path);
+      if (located) {
+        if (!highlightLine && d.level === 'error') highlightLine = located.line;
+        li.textContent = `${d.level === 'error' ? '错误' : '警告'} ${d.path} @ ${located.line}:${located.col} - ${d.message}`;
+        li.addEventListener('click', () => focusEditorAt(refs.template, located.line, located.col));
+      } else {
+        li.textContent = `${d.level === 'error' ? '错误' : '警告'} ${d.path} - ${d.message}`;
+      }
+      refs.errors.appendChild(li);
+    });
+  }
+  editorState.highlightLine = highlightLine;
+  actionBtn.disabled = hasHardError;
+  renderProtocolEditorVisual(kind, highlightLine);
+}
+
+function analyzeProtocolEditor(kind) {
+  const refs = protocolFieldRefs(kind);
+  const parsed = parseJSONDetailed(refs.template.value || '{}');
+  if (!parsed.ok) return parsed;
+  if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) {
+    return { ok: true, value: parsed.value, diagnostics: [{ level: 'error', message: '模板 JSON 顶层必须是对象', path: '$' }] };
+  }
+  return { ok: true, value: parsed.value, diagnostics: validateProtocolTemplate(parsed.value) };
+}
+
+function syncProtocolFieldsFromTemplate(kind, template) {
+  const editorState = state.protocolEditors[kind];
+  if (editorState.syncingFromFields) return;
+  const refs = protocolFieldRefs(kind);
+  editorState.syncingFromTemplate = true;
+  refs.name.value = String(template?.name || '');
+  refs.desc.value = String(template?.description || '');
+  const templateType = String(template?.protocol_type || '').trim();
+  if (kind === 'new') {
+    if ([...refs.type.options].some(o => o.value === templateType)) refs.type.value = templateType;
+  } else {
+    refs.type.value = templateType;
+  }
+  editorState.syncingFromTemplate = false;
+}
+
+function onProtocolTemplateInput(kind) {
+  const editorState = state.protocolEditors[kind];
+  if (editorState.syncingFromFields) return;
+  const analysis = analyzeProtocolEditor(kind);
+  editorState.lastAnalysis = analysis;
+  if (analysis.ok && analysis.value && typeof analysis.value === 'object' && !Array.isArray(analysis.value)) {
+    syncProtocolFieldsFromTemplate(kind, analysis.value);
+  }
+  renderProtocolDiagnostics(kind, analysis);
+}
+
+function syncProtocolTemplateFromFields(kind) {
+  const editorState = state.protocolEditors[kind];
+  if (editorState.syncingFromTemplate) return;
+  const refs = protocolFieldRefs(kind);
+  const parsed = parseJSONDetailed(refs.template.value || '{}');
+  const obj = parsed.ok && parsed.value && typeof parsed.value === 'object' && !Array.isArray(parsed.value) ? parsed.value : {};
+  editorState.syncingFromFields = true;
+  obj.name = refs.name.value;
+  obj.description = refs.desc.value;
+  obj.protocol_type = refs.type.value;
+  refs.template.value = pretty(obj);
+  editorState.syncingFromFields = false;
+  onProtocolTemplateInput(kind);
+}
+
+function formatProtocolTemplate(kind) {
+  const refs = protocolFieldRefs(kind);
+  const parsed = parseJSONDetailed(refs.template.value || '{}');
+  if (!parsed.ok) {
+    renderProtocolDiagnostics(kind, parsed);
+    return;
+  }
+  refs.template.value = pretty(parsed.value);
+  onProtocolTemplateInput(kind);
+}
+
+function getProtocolPayload(kind) {
+  const refs = protocolFieldRefs(kind);
+  syncProtocolTemplateFromFields(kind);
+  const analysis = analyzeProtocolEditor(kind);
+  renderProtocolDiagnostics(kind, analysis);
+  if (!analysis.ok) {
+    throw new Error(`模板 JSON 语法错误（第 ${analysis.error.line} 行，第 ${analysis.error.col} 列）`);
+  }
+  const hard = (analysis.diagnostics || []).find(d => d.level === 'error');
+  if (hard) throw new Error(`模板校验失败：${hard.message}`);
+  return {
+    name: refs.name.value,
+    description: refs.desc.value,
+    protocol_type: refs.type.value,
+    template: analysis.value,
+  };
+}
+
+function initProtocolEditors() {
+  syncProtocolTemplateFromFields('new');
+  renderProtocolEditorVisual('new', state.protocolEditors.new.highlightLine);
+  el('edit-protocol-template').value = '{}';
+  renderProtocolEditorVisual('edit', null);
+  el('edit-protocol-template-status').className = 'editor-status';
+  el('edit-protocol-template-status').textContent = 'JSON 诊断：请选择协议';
+  el('edit-protocol-template-errors').innerHTML = '';
+  el('update-protocol-btn').disabled = true;
 }
 
 function protocolTypeText(type) {
@@ -136,7 +584,7 @@ function renderDashboard() {
     .map(item => {
       const rt = item.runtime || {};
       const payload = rt.payload || {};
-      let metric = `${rt.weight ?? '--'} ${rt.unit || 'kg'}`;
+      let metric = `${formatWeightValue(rt.weight, resolveWeightDecimals(rt))} ${rt.unit || 'kg'}`;
       let extra = '-';
       if (item.device_category === 'printer_tsc') {
         metric = `打印回执: ${payload.print_ack ?? '--'}`;
@@ -240,10 +688,13 @@ async function refreshDevices() {
     state.devices = devices;
     const rows = devices.map(d => {
       const rt = d.runtime || {};
+      const displayData = rt.weight != null
+        ? formatWeightValue(rt.weight, resolveWeightDecimals(rt))
+        : (rt.barcode ?? rt.board_value ?? '-');
       return `<tr>
         <td>${d.id}</td><td>${d.device_code || '-'}</td><td>${d.name}</td><td>${d.device_category || 'weight'}</td>
         <td>${d.protocol_template_id}</td><td>${STATUS_TEXT[rt.status] || rt.status || '离线'}</td>
-        <td>${rt.weight ?? rt.barcode ?? rt.board_value ?? '-'}</td><td>${formatTimestamp(rt.timestamp)}</td><td>${rt.error || '-'}</td>
+        <td>${displayData}</td><td>${formatTimestamp(rt.timestamp)}</td><td>${rt.error || '-'}</td>
         <td>${d.enabled ? '是' : '否'}</td>
         <td><button data-edit-device="${d.id}" class="btn-sec">编辑</button> <button data-delete-device="${d.id}">删除</button></td>
       </tr>`;
@@ -275,6 +726,10 @@ async function loadProtocolOptions() {
   el('edit-device-protocol').innerHTML = html;
   el('edit-protocol-id').innerHTML = `<option value="">请选择协议</option>${html}`;
   el('step-test-protocol').innerHTML = html;
+  if (!el('new-device-protocol').value && state.protocols.length > 0) {
+    el('new-device-protocol').value = String(state.protocols[0].id);
+  }
+  await applyDeviceTemplateDefaults('new');
 }
 
 function refreshDeviceEditOptions() {
@@ -570,14 +1025,8 @@ async function refreshProtocols() {
 }
 
 async function createProtocol() {
-  const payload = {
-    name: el('new-protocol-name').value,
-    description: el('new-protocol-desc').value,
-    protocol_type: el('new-protocol-type').value,
-    template: safeParseJSON(el('new-protocol-template').value, {}),
-    is_system: false,
-  };
   try {
+    const payload = { ...getProtocolPayload('new'), is_system: false };
     const created = await api('/api/protocols', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     el('create-protocol-result').className = 'ok';
     el('create-protocol-result').textContent = `创建成功：协议ID=${created.id}`;
@@ -591,13 +1040,30 @@ async function createProtocol() {
 
 async function loadEditProtocol() {
   const id = Number(el('edit-protocol-id').value || 0);
-  if (!id) return;
+  if (!id) {
+    el('edit-protocol-template').value = '{}';
+    state.protocolEditors.edit.highlightLine = null;
+    state.protocolEditors.edit.lineCount = 0;
+    renderProtocolEditorVisual('edit', null);
+    el('edit-protocol-template-status').className = 'editor-status';
+    el('edit-protocol-template-status').textContent = 'JSON 诊断：请选择协议';
+    el('edit-protocol-template-errors').innerHTML = '';
+    el('update-protocol-btn').disabled = true;
+    return;
+  }
   try {
     const p = await api(`/api/protocols/${id}`);
     el('edit-protocol-name').value = p.name || '';
     el('edit-protocol-desc').value = p.description || '';
     el('edit-protocol-type').value = p.protocol_type || '';
-    el('edit-protocol-template').value = pretty(p.template || {});
+    const editorTemplate = {
+      ...(p.template || {}),
+      name: p.name || '',
+      description: p.description || '',
+      protocol_type: p.protocol_type || '',
+    };
+    el('edit-protocol-template').value = pretty(editorTemplate);
+    onProtocolTemplateInput('edit');
   } catch (e) {
     el('edit-protocol-result').className = 'err';
     el('edit-protocol-result').textContent = e.message;
@@ -607,13 +1073,8 @@ async function loadEditProtocol() {
 async function updateProtocol() {
   const id = Number(el('edit-protocol-id').value || 0);
   if (!id) return;
-  const payload = {
-    name: el('edit-protocol-name').value,
-    description: el('edit-protocol-desc').value,
-    protocol_type: el('edit-protocol-type').value,
-    template: safeParseJSON(el('edit-protocol-template').value, {}),
-  };
   try {
+    const payload = getProtocolPayload('edit');
     const updated = await api(`/api/protocols/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     el('edit-protocol-result').className = 'ok';
     el('edit-protocol-result').textContent = `更新成功：协议ID=${updated.id}`;
@@ -752,7 +1213,9 @@ function refreshCurrentTab() {
 
 function bindEvents() {
   el('create-device-btn').addEventListener('click', createDevice);
+  el('new-device-protocol').addEventListener('change', () => applyDeviceTemplateDefaults('new'));
   el('edit-device-id').addEventListener('change', loadEditDevice);
+  el('edit-device-protocol').addEventListener('change', () => applyDeviceTemplateDefaults('edit'));
   el('update-device-btn').addEventListener('click', updateDevice);
   el('test-device-connection-btn').addEventListener('click', testDeviceConnection);
   el('control-device').addEventListener('change', loadControlSteps);
@@ -763,6 +1226,26 @@ function bindEvents() {
   el('debug-run').addEventListener('click', runDebugAction);
 
   el('create-protocol-btn').addEventListener('click', createProtocol);
+  el('new-protocol-template').addEventListener('input', () => onProtocolTemplateInput('new'));
+  el('edit-protocol-template').addEventListener('input', () => onProtocolTemplateInput('edit'));
+  el('new-protocol-template').addEventListener('scroll', () => renderProtocolEditorVisual('new', state.protocolEditors.new.highlightLine));
+  el('edit-protocol-template').addEventListener('scroll', () => renderProtocolEditorVisual('edit', state.protocolEditors.edit.highlightLine));
+  el('new-protocol-template-gutter').addEventListener('click', e => {
+    const line = Number(e.target?.dataset?.line || 0);
+    if (line > 0) focusEditorAt(el('new-protocol-template'), line, 1);
+  });
+  el('edit-protocol-template-gutter').addEventListener('click', e => {
+    const line = Number(e.target?.dataset?.line || 0);
+    if (line > 0) focusEditorAt(el('edit-protocol-template'), line, 1);
+  });
+  el('new-protocol-name').addEventListener('input', () => syncProtocolTemplateFromFields('new'));
+  el('new-protocol-desc').addEventListener('input', () => syncProtocolTemplateFromFields('new'));
+  el('new-protocol-type').addEventListener('change', () => syncProtocolTemplateFromFields('new'));
+  el('edit-protocol-name').addEventListener('input', () => syncProtocolTemplateFromFields('edit'));
+  el('edit-protocol-desc').addEventListener('input', () => syncProtocolTemplateFromFields('edit'));
+  el('edit-protocol-type').addEventListener('input', () => syncProtocolTemplateFromFields('edit'));
+  el('new-protocol-format-btn').addEventListener('click', () => formatProtocolTemplate('new'));
+  el('edit-protocol-format-btn').addEventListener('click', () => formatProtocolTemplate('edit'));
   el('edit-protocol-id').addEventListener('change', loadEditProtocol);
   el('update-protocol-btn').addEventListener('click', updateProtocol);
   el('delete-protocol-btn').addEventListener('click', deleteProtocol);
@@ -778,6 +1261,7 @@ function bindEvents() {
 async function boot() {
   setupTabs();
   bindEvents();
+  initProtocolEditors();
   await loadProtocolOptions();
   await refreshDashboardFallback();
   openDashboardWS();
