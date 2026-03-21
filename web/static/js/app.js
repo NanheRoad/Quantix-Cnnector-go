@@ -1,4 +1,8 @@
-const API_KEY = localStorage.getItem('quantix_api_key') || 'quantix-dev-key';
+const queryAPIKey = new URLSearchParams(location.search).get('api_key');
+if (queryAPIKey && queryAPIKey.trim()) {
+  localStorage.setItem('quantix_api_key', queryAPIKey.trim());
+}
+const API_KEY = (queryAPIKey && queryAPIKey.trim()) || localStorage.getItem('quantix_api_key') || 'quantix-dev-key';
 const BASE = `${location.protocol}//${location.host}`;
 document.getElementById('backend-url').textContent = BASE;
 

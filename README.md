@@ -40,6 +40,21 @@ go run ./cmd/server
 - 后端：`http://127.0.0.1:8000`
 - 前端：`http://127.0.0.1:8000`（由后端静态托管）
 
+### 3.3 启动桌面托盘版（Win/mac）
+
+```bash
+go run ./cmd/desktop
+```
+
+行为：
+
+- 启动后默认不弹主界面，仅驻留系统托盘
+- 托盘右键菜单：
+  - `打开前端`（系统默认浏览器，固定 `http://127.0.0.1:8000/`）
+  - `打开日志`（弹出日志小窗口，毫秒时间戳）
+  - `设置 API Key`（保存后自动重启本地服务）
+  - `退出`（优雅关闭服务）
+
 ## 4. 配置项（环境变量）
 
 - `API_KEY`：默认 `quantix-dev-key`
@@ -74,7 +89,7 @@ go run ./cmd/server
 
 请看文档：
 
-- [docs/plan/common-device-templates.md](/Users/n/Code/Quantix-Cnnector-go/docs/plan/common-device-templates.md)
+- [docs/common-device-templates.md](/Users/n/Code/Quantix-Cnnector-go/docs/common-device-templates.md)
 
 包括：
 
