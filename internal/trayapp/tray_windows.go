@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 type Options struct {
@@ -25,7 +26,11 @@ var (
 
 func Run(opts Options) error {
 	script := buildPowerShellScript(opts)
-	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
