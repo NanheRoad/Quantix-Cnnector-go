@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -165,6 +167,7 @@ func (m *DeviceManager) ExecuteManualStep(ctx context.Context, deviceID uint, st
 	output, _ := result["output"].(map[string]any)
 	weight := toFloatPtr(mgrValueOr(output["weight"], rt.state.Weight))
 	unit := normalizeUnit(fmt.Sprintf("%v", mgrValueOr(output["unit"], rt.state.Unit)))
+	weight, unit = recoverWeightUnit(output, weight, unit)
 	category := normalizeCategory(rt.device.DeviceCategory)
 	eventType := eventTypeForCategory(category)
 	payload := buildRuntimePayload(output)
@@ -384,6 +387,7 @@ func (m *DeviceManager) runRuntimeLoop(rt *deviceRuntime) {
 			output := m.executor.RenderOutput(templateMap, contextMap)
 			weight := toFloatPtr(output["weight"])
 			unit := normalizeUnit(fmt.Sprintf("%v", mgrValueOr(output["unit"], "kg")))
+			weight, unit = recoverWeightUnit(output, weight, unit)
 			category := normalizeCategory(rt.device.DeviceCategory)
 			eventType := eventTypeForCategory(category)
 			payload := buildRuntimePayload(output)
@@ -444,6 +448,7 @@ func (m *DeviceManager) handleMqttMessage(rt *deviceRuntime, topic string, paylo
 	rt.state.StepResults = steps
 	weight := toFloatPtr(output["weight"])
 	unit := normalizeUnit(fmt.Sprintf("%v", mgrValueOr(output["unit"], "kg")))
+	weight, unit = recoverWeightUnit(output, weight, unit)
 	category := normalizeCategory(rt.device.DeviceCategory)
 	eventType := eventTypeForCategory(category)
 	payloadMap := buildRuntimePayload(output)
@@ -480,7 +485,56 @@ func normalizeUnit(v string) string {
 	if s == "" {
 		return "kg"
 	}
+	s = strings.TrimSpace(strings.Trim(s, "?"))
+	s = strings.ReplaceAll(s, "NET", "")
+	s = strings.TrimSpace(s)
+	// Some device responses may leak value + unit into the unit field (e.g. "0.66 g").
+	// Keep only trailing alphabetic unit tokens in that case.
+	if strings.ContainsAny(s, "0123456789") || strings.Contains(s, " ") {
+		re := regexp.MustCompile(`([A-Za-z:]+)`)
+		all := re.FindAllString(s, -1)
+		if len(all) > 0 {
+			return all[len(all)-1]
+		}
+	}
 	return s
+}
+
+func recoverWeightUnit(output map[string]any, weight *float64, unit string) (*float64, string) {
+	raw := rawPayloadText(output["raw_payload"])
+	if strings.TrimSpace(raw) == "" {
+		return weight, normalizeUnit(unit)
+	}
+	re := regexp.MustCompile(`([-+]?[0-9]+(?:\.[0-9]+)?)\s*([A-Za-z:]+)?`)
+	m := re.FindStringSubmatch(raw)
+	if len(m) < 2 {
+		return weight, normalizeUnit(unit)
+	}
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(m[1]), 64)
+	if err != nil {
+		return weight, normalizeUnit(unit)
+	}
+	unitCandidate := unit
+	if len(m) > 2 && strings.TrimSpace(m[2]) != "" {
+		unitCandidate = m[2]
+	}
+	if weight == nil || (*weight == 0 && parsed != 0) || strings.ContainsAny(unit, "0123456789") {
+		weight = &parsed
+	}
+	return weight, normalizeUnit(unitCandidate)
+}
+
+func rawPayloadText(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprintf("%v", t)
+	}
 }
 
 func eventTypeForCategory(category string) string {

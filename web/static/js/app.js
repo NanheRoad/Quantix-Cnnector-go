@@ -1,3 +1,5 @@
+const initialKey = new URLSearchParams(location.search).get('api_key');
+if (initialKey !== null) localStorage.setItem('quantix_api_key', initialKey);
 const API_KEY = localStorage.getItem('quantix_api_key') || 'quantix-dev-key';
 const BASE = `${location.protocol}//${location.host}`;
 document.getElementById('backend-url').textContent = BASE;
@@ -47,6 +49,29 @@ const ALLOWED_PARSE_TYPES = new Set(['expression', 'regex', 'substring', 'struct
 
 function el(id) { return document.getElementById(id); }
 function pretty(v) { return JSON.stringify(v, null, 2); }
+function decodeBase64Text(v) {
+  try {
+    const binary = atob(String(v || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+function withDecodedRawPayload(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const out = JSON.parse(JSON.stringify(result));
+  const payload = out?.output?.raw_payload;
+  if (typeof payload === 'string' && payload.trim() !== '') {
+    const text = decodeBase64Text(payload);
+    if (text != null) {
+      out.output.raw_payload_text = text;
+      out.output.raw_payload_escaped = JSON.stringify(text).slice(1, -1);
+    }
+  }
+  return out;
+}
 function pad2(v) { return String(v).padStart(2, '0'); }
 function pad3(v) { return String(v).padStart(3, '0'); }
 function formatTimestamp(raw) {
@@ -985,7 +1010,7 @@ async function runControl(mode) {
     el('control-result').className = 'ok';
     const modeText = mode === 'tare' ? '去皮' : mode === 'zero' ? '清零' : '手动';
     el('control-result').textContent = `执行成功：${modeText}（${stepId}）`;
-    el('control-detail').textContent = pretty(result);
+    el('control-detail').textContent = pretty(withDecodedRawPayload(result));
   } catch (e) {
     el('control-result').className = 'err';
     el('control-result').textContent = `执行失败: ${e.message}`;

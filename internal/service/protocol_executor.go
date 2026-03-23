@@ -178,7 +178,7 @@ func (e *ProtocolExecutor) executeStep(ctx context.Context, drv driver.Driver, s
 }
 
 func runTransform(action string, params map[string]any) (any, error) {
-	input := fmt.Sprintf("%v", execValueOr(params["input"], ""))
+	input := transformInputString(execValueOr(params["input"], ""))
 	switch action {
 	case "transform.base64_decode":
 		return base64.StdEncoding.DecodeString(input)
@@ -214,6 +214,32 @@ func runTransform(action string, params map[string]any) (any, error) {
 		return input[start:end], nil
 	default:
 		return nil, fmt.Errorf("Unsupported transform action: %s", action)
+	}
+}
+
+func transformInputString(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	case map[string]any:
+		// Common pattern: pass previous step raw result object into transform.
+		if p, ok := t["payload"]; ok {
+			switch b := p.(type) {
+			case []byte:
+				return string(b)
+			case string:
+				return b
+			default:
+				return fmt.Sprintf("%v", b)
+			}
+		}
+		return fmt.Sprintf("%v", t)
+	default:
+		return fmt.Sprintf("%v", t)
 	}
 }
 
@@ -466,7 +492,13 @@ func evalExpression(expression string, raw any, contextMap map[string]any) (any,
 	env := map[string]any{
 		"steps": contextMap["steps"],
 		"int":   func(v any) int { return int(anyToFloat(v)) },
-		"float": func(v any) float64 { return anyToFloat(v) },
+		// Return nil for non-numeric values to avoid masking parse failures as 0.
+		"float": func(v any) any {
+			if n, ok := anyToFloatStrict(v); ok {
+				return n
+			}
+			return nil
+		},
 		"str":   func(v any) string { return fmt.Sprintf("%v", v) },
 	}
 	for k, v := range contextMap {
@@ -571,25 +603,30 @@ func getFromContext(path string, contextMap map[string]any) any {
 }
 
 func anyToFloat(v any) float64 {
+	n, _ := anyToFloatStrict(v)
+	return n
+}
+
+func anyToFloatStrict(v any) (float64, bool) {
 	switch t := v.(type) {
 	case float64:
-		return t
+		return t, true
 	case float32:
-		return float64(t)
+		return float64(t), true
 	case int:
-		return float64(t)
+		return float64(t), true
 	case int64:
-		return float64(t)
+		return float64(t), true
 	case uint:
-		return float64(t)
+		return float64(t), true
 	case string:
 		n, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
 		if err != nil {
-			return 0
+			return 0, false
 		}
-		return n
+		return n, true
 	default:
-		return 0
+		return 0, false
 	}
 }
 

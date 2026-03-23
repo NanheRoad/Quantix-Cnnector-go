@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,9 +18,11 @@ import (
 	"quantix-connector-go/internal/config"
 	"quantix-connector-go/internal/service"
 	"quantix-connector-go/internal/store"
+	"quantix-connector-go/internal/trayapp"
 )
 
 func main() {
+	logPath := setupLogger()
 	cfg := config.Load()
 	db, err := store.OpenDB(cfg)
 	if err != nil {
@@ -44,21 +50,70 @@ func main() {
 		}
 	}()
 
+	var shutdownOnce sync.Once
+	shutdownDone := make(chan struct{})
+	shutdown := func(reason string) {
+		shutdownOnce.Do(func() {
+			log.Printf("shutdown: %s", reason)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := httpServer.Shutdown(ctx); err != nil {
+				log.Printf("http server shutdown error: %v", err)
+			}
+			if err := manager.Shutdown(ctx); err != nil {
+				log.Printf("device manager shutdown error: %v", err)
+			}
+			close(shutdownDone)
+		})
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-	log.Println("shutdown signal received")
+	go func() {
+		sig := <-sigCh
+		shutdown("signal: " + sig.String())
+		trayapp.RequestQuit()
+	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Printf("http server shutdown error: %v", err)
-	}
-	if err := manager.Shutdown(ctx); err != nil {
-		log.Printf("device manager shutdown error: %v", err)
+	frontendURL := fmt.Sprintf("http://%s", httpServer.Addr)
+	err = trayapp.Run(trayapp.Options{
+		FrontendURL: frontendURL,
+		LogPath:     logPath,
+		GetAPIKey:   server.CurrentAPIKey,
+		UpdateAPIKey: func(v string) error {
+			server.SetAPIKey(v)
+			return config.SaveAPIKey(v)
+		},
+		OnQuit: func() {
+			shutdown("tray menu")
+		},
+	})
+	if err != nil {
+		log.Printf("tray unavailable: %v", err)
+		log.Println("fallback to signal mode; press Ctrl+C to exit")
+		<-shutdownDone
 	}
 }
 
 func itoa(v int) string {
 	return fmt.Sprintf("%d", v)
+}
+
+func setupLogger() string {
+	dir := filepath.Join(".", "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("create logs dir failed: %v", err)
+		return ""
+	}
+	path := filepath.Join(dir, "quantix.log")
+	absPath, _ := filepath.Abs(path)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("open log file failed: %v", err)
+		return absPath
+	}
+	log.SetOutput(io.MultiWriter(os.Stdout, f))
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.Printf("log file: %s", strings.TrimSpace(absPath))
+	return absPath
 }

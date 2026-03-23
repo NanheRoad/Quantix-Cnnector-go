@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -23,6 +25,11 @@ type Settings struct {
 }
 
 func Load() Settings {
+	local := loadLocalConfig()
+	defaultAPIKey := "quantix-dev-key"
+	if strings.TrimSpace(local.APIKey) != "" {
+		defaultAPIKey = strings.TrimSpace(local.APIKey)
+	}
 	return Settings{
 		DBType:                strings.ToLower(getenv("DB_TYPE", "sqlite")),
 		DBName:                getenv("DB_NAME", "quantix.db"),
@@ -30,7 +37,7 @@ func Load() Settings {
 		DBPassword:            getenv("DB_PASSWORD", ""),
 		DBHost:                getenv("DB_HOST", "127.0.0.1"),
 		DBPort:                atoi(getenv("DB_PORT", "3306"), 3306),
-		APIKey:                getenv("API_KEY", "quantix-dev-key"),
+		APIKey:                getenv("API_KEY", defaultAPIKey),
 		LogLevel:              getenv("LOG_LEVEL", "INFO"),
 		BackendHost:           getenv("BACKEND_HOST", "127.0.0.1"),
 		BackendPort:           atoi(getenv("BACKEND_PORT", "8000"), 8000),
@@ -38,6 +45,37 @@ func Load() Settings {
 		FrontendPort:          atoi(getenv("FRONTEND_PORT", "8001"), 8001),
 		SimulateOnConnectFail: parseBool(getenv("SIMULATE_ON_CONNECT_FAIL", "false")),
 	}
+}
+
+type localConfig struct {
+	APIKey string `json:"api_key"`
+}
+
+func localConfigPath() string {
+	return filepath.Join(".", "quantix.local.json")
+}
+
+func loadLocalConfig() localConfig {
+	path := localConfigPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return localConfig{}
+	}
+	var cfg localConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return localConfig{}
+	}
+	return cfg
+}
+
+func SaveAPIKey(apiKey string) error {
+	path := localConfigPath()
+	cfg := localConfig{APIKey: strings.TrimSpace(apiKey)}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 func getenv(key, fallback string) string {

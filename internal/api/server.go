@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	webembed "quantix-connector-go"
 	"quantix-connector-go/internal/config"
@@ -20,10 +21,12 @@ type Server struct {
 	serialDebug *service.SerialDebugService
 	webFS       fs.FS
 	staticFS    http.FileSystem
+	apiKey      atomic.Value
 }
 
 func NewServer(cfg config.Settings, db *gorm.DB, manager *service.DeviceManager, serialDebug *service.SerialDebugService) *Server {
 	s := &Server{cfg: cfg, db: db, manager: manager, serialDebug: serialDebug}
+	s.apiKey.Store(strings.TrimSpace(cfg.APIKey))
 	webFS, err := webembed.WebFS()
 	if err == nil {
 		s.webFS = webFS
@@ -61,10 +64,24 @@ func (s *Server) Router() *gin.Engine {
 }
 
 func (s *Server) verifyAPIKey(v string) bool {
-	if strings.TrimSpace(s.cfg.APIKey) == "" {
+	current := s.CurrentAPIKey()
+	if current == "" {
 		return true
 	}
-	return strings.TrimSpace(v) == strings.TrimSpace(s.cfg.APIKey)
+	return strings.TrimSpace(v) == current
+}
+
+func (s *Server) CurrentAPIKey() string {
+	if raw := s.apiKey.Load(); raw != nil {
+		if v, ok := raw.(string); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func (s *Server) SetAPIKey(v string) {
+	s.apiKey.Store(strings.TrimSpace(v))
 }
 
 func (s *Server) requireAPIKey() gin.HandlerFunc {
