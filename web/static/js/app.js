@@ -215,16 +215,41 @@ function resolveWeightDecimals(rt) {
 }
 
 function protocolFieldRefs(kind) {
+  const template = el(`${kind}-protocol-template`);
   return {
     name: el(`${kind}-protocol-name`),
     desc: el(`${kind}-protocol-desc`),
     type: el(`${kind}-protocol-type`),
-    template: el(`${kind}-protocol-template`),
+    template,
     syntax: el(`${kind}-protocol-template-syntax`),
     gutter: el(`${kind}-protocol-template-gutter`),
     status: el(`${kind}-protocol-template-status`),
     errors: el(`${kind}-protocol-template-errors`),
+    wrap: template ? template.closest('.json-editor-wrap') : null,
   };
+}
+
+function buildProtocolEditorObject(kind) {
+  const refs = protocolFieldRefs(kind);
+  return {
+    name: refs.name.value || '',
+    description: refs.desc.value || '',
+    protocol_type: refs.type.value || '',
+  };
+}
+
+function setProtocolEditorText(kind, text, options = {}) {
+  const refs = protocolFieldRefs(kind);
+  const editorState = state.protocolEditors[kind];
+  const preserveScroll = Boolean(options.preserveScroll);
+  const nextText = String(text ?? '');
+  if (refs.template.value === nextText) {
+    renderProtocolEditorVisual(kind, editorState.highlightLine);
+    return;
+  }
+  refs.template.value = nextText;
+  if (!preserveScroll) refs.template.scrollTop = 0;
+  editorState.lineCount = 0;
 }
 
 function escapeHTML(text) {
@@ -502,13 +527,15 @@ function syncProtocolFieldsFromTemplate(kind, template) {
   if (editorState.syncingFromFields) return;
   const refs = protocolFieldRefs(kind);
   editorState.syncingFromTemplate = true;
-  refs.name.value = String(template?.name || '');
-  refs.desc.value = String(template?.description || '');
+  const nextName = String(template?.name || '');
+  const nextDesc = String(template?.description || '');
+  if (refs.name.value !== nextName) refs.name.value = nextName;
+  if (refs.desc.value !== nextDesc) refs.desc.value = nextDesc;
   const templateType = String(template?.protocol_type || '').trim();
   if (kind === 'new') {
-    if ([...refs.type.options].some(o => o.value === templateType)) refs.type.value = templateType;
+    if ([...refs.type.options].some(o => o.value === templateType) && refs.type.value !== templateType) refs.type.value = templateType;
   } else {
-    refs.type.value = templateType;
+    if (refs.type.value !== templateType) refs.type.value = templateType;
   }
   editorState.syncingFromTemplate = false;
 }
@@ -529,12 +556,14 @@ function syncProtocolTemplateFromFields(kind) {
   if (editorState.syncingFromTemplate) return;
   const refs = protocolFieldRefs(kind);
   const parsed = parseJSONDetailed(refs.template.value || '{}');
-  const obj = parsed.ok && parsed.value && typeof parsed.value === 'object' && !Array.isArray(parsed.value) ? parsed.value : {};
+  const obj = parsed.ok && parsed.value && typeof parsed.value === 'object' && !Array.isArray(parsed.value)
+    ? parsed.value
+    : buildProtocolEditorObject(kind);
   editorState.syncingFromFields = true;
   obj.name = refs.name.value;
   obj.description = refs.desc.value;
   obj.protocol_type = refs.type.value;
-  refs.template.value = pretty(obj);
+  setProtocolEditorText(kind, pretty(obj));
   editorState.syncingFromFields = false;
   onProtocolTemplateInput(kind);
 }
@@ -546,7 +575,7 @@ function formatProtocolTemplate(kind) {
     renderProtocolDiagnostics(kind, parsed);
     return;
   }
-  refs.template.value = pretty(parsed.value);
+  setProtocolEditorText(kind, pretty(parsed.value), { preserveScroll: false });
   onProtocolTemplateInput(kind);
 }
 
@@ -569,14 +598,32 @@ function getProtocolPayload(kind) {
 }
 
 function initProtocolEditors() {
-  syncProtocolTemplateFromFields('new');
+  setProtocolEditorText('new', pretty(buildProtocolEditorObject('new')));
+  onProtocolTemplateInput('new');
   renderProtocolEditorVisual('new', state.protocolEditors.new.highlightLine);
-  el('edit-protocol-template').value = '{}';
+  setProtocolEditorText('edit', '{}');
   renderProtocolEditorVisual('edit', null);
   el('edit-protocol-template-status').className = 'editor-status';
   el('edit-protocol-template-status').textContent = 'JSON 诊断：请选择协议';
   el('edit-protocol-template-errors').innerHTML = '';
   el('update-protocol-btn').disabled = true;
+  setupProtocolEditorResizeObserver('new');
+  setupProtocolEditorResizeObserver('edit');
+}
+
+function setupProtocolEditorResizeObserver(kind) {
+  const refs = protocolFieldRefs(kind);
+  const editorState = state.protocolEditors[kind];
+  if (!refs.wrap || editorState.resizeObserverAttached) return;
+  const onResize = () => renderProtocolEditorVisual(kind, editorState.highlightLine);
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(onResize);
+    observer.observe(refs.wrap);
+    editorState.resizeObserver = observer;
+  } else {
+    window.addEventListener('resize', onResize);
+  }
+  editorState.resizeObserverAttached = true;
 }
 
 function protocolTypeText(type) {
@@ -1119,7 +1166,7 @@ async function createProtocol() {
 async function loadEditProtocol() {
   const id = Number(el('edit-protocol-id').value || 0);
   if (!id) {
-    el('edit-protocol-template').value = '{}';
+    setProtocolEditorText('edit', '{}');
     state.protocolEditors.edit.highlightLine = null;
     state.protocolEditors.edit.lineCount = 0;
     renderProtocolEditorVisual('edit', null);
@@ -1140,7 +1187,7 @@ async function loadEditProtocol() {
       description: p.description || '',
       protocol_type: p.protocol_type || '',
     };
-    el('edit-protocol-template').value = pretty(editorTemplate);
+    setProtocolEditorText('edit', pretty(editorTemplate));
     onProtocolTemplateInput('edit');
   } catch (e) {
     el('edit-protocol-result').className = 'err';
