@@ -1,8 +1,4 @@
-const queryAPIKey = new URLSearchParams(location.search).get('api_key');
-if (queryAPIKey && queryAPIKey.trim()) {
-  localStorage.setItem('quantix_api_key', queryAPIKey.trim());
-}
-const API_KEY = (queryAPIKey && queryAPIKey.trim()) || localStorage.getItem('quantix_api_key') || 'quantix-dev-key';
+const API_KEY = localStorage.getItem('quantix_api_key') || 'quantix-dev-key';
 const BASE = `${location.protocol}//${location.host}`;
 document.getElementById('backend-url').textContent = BASE;
 
@@ -103,31 +99,66 @@ function mergeTemplateVars(defaultVars, currentVars) {
   return merged;
 }
 
-async function fetchProtocolTemplateByID(protocolID) {
+function buildConnectionDefaultParams(protocolTypeRaw) {
+  const protocolType = String(protocolTypeRaw || '').trim().toLowerCase();
+  if (protocolType === 'serial' || protocolType === 'modbus_rtu') {
+    return {
+      port: 'COM3',
+      baudrate: 9600,
+      bytesize: 8,
+      parity: 'N',
+      stopbits: 1,
+      timeout: 1.0,
+    };
+  }
+  if (protocolType === 'mqtt') {
+    return {
+      host: '127.0.0.1',
+      port: 1883,
+      username: '',
+      password: '',
+    };
+  }
+  if (protocolType === 'modbus_tcp' || protocolType === 'tcp' || protocolType === 'modbus') {
+    return {
+      host: '127.0.0.1',
+      port: 502,
+      timeout: 1.0,
+    };
+  }
+  return {};
+}
+
+async function fetchProtocolByID(protocolID) {
   const id = Number(protocolID || 0);
   if (!id) return null;
   const inList = state.protocols.find(p => Number(p.id) === id);
-  if (inList && inList.template && typeof inList.template === 'object') return inList.template;
+  if (inList && typeof inList === 'object') return inList;
   const detail = await api(`/api/protocols/${id}`);
-  return detail?.template || null;
+  return detail || null;
 }
 
 async function applyDeviceTemplateDefaults(kind) {
   const selectID = kind === 'new' ? 'new-device-protocol' : 'edit-device-protocol';
+  const connID = kind === 'new' ? 'new-device-conn' : 'edit-device-conn';
   const varsID = kind === 'new' ? 'new-device-vars' : 'edit-device-vars';
   const resultID = kind === 'new' ? 'create-device-result' : 'update-device-result';
   const protocolID = Number(el(selectID).value || 0);
   if (!protocolID) return;
   try {
-    const template = await fetchProtocolTemplateByID(protocolID);
+    const protocol = await fetchProtocolByID(protocolID);
+    const template = protocol?.template || {};
+    const protocolType = protocol?.protocol_type || template?.protocol_type || '';
+    const connDefaults = buildConnectionDefaultParams(protocolType);
     const defaults = buildTemplateDefaultVars(template);
     const current = safeParseJSON(el(varsID).value, {});
     const merged = mergeTemplateVars(defaults, current);
+    el(connID).value = pretty(connDefaults);
     el(varsID).value = pretty(merged);
     el(resultID).textContent = '';
   } catch (e) {
     el(resultID).className = 'err';
-    el(resultID).textContent = `加载模板默认变量失败: ${e.message}`;
+    el(resultID).textContent = `加载模板默认配置失败: ${e.message}`;
   }
 }
 
@@ -889,17 +920,31 @@ function findQuickStepId(manualSteps, command) {
 async function refreshControlDevices() {
   if (state.activeTab !== 'control') return;
   try {
+    const deviceSelect = el('control-device');
+    const stepSelect = el('control-step');
+    const previousDeviceId = Number(deviceSelect.value || 0);
+    const previousStepId = String(stepSelect.value || '');
     const devices = await api('/api/devices');
     const enabled = devices.filter(d => d.enabled);
-    el('control-device').innerHTML = enabled.map(d => `<option value="${d.id}">#${d.id} [${d.device_code || '-'}] ${d.name}</option>`).join('');
-    await loadControlSteps();
+    deviceSelect.innerHTML = enabled.map(d => `<option value="${d.id}">#${d.id} [${d.device_code || '-'}] ${d.name}</option>`).join('');
+    if (!enabled.length) {
+      stepSelect.innerHTML = '';
+      return;
+    }
+    if (previousDeviceId && enabled.some(d => Number(d.id) === previousDeviceId)) {
+      deviceSelect.value = String(previousDeviceId);
+    }
+    const currentDeviceId = Number(deviceSelect.value || 0);
+    const preferredStepId = currentDeviceId === previousDeviceId ? previousStepId : '';
+    await loadControlSteps({ preferredStepId });
   } catch (e) {
     el('control-result').className = 'err';
     el('control-result').textContent = `加载设备失败: ${e.message}`;
   }
 }
 
-async function loadControlSteps() {
+async function loadControlSteps(options = {}) {
+  const preferredStepId = typeof options.preferredStepId === 'string' ? options.preferredStepId : String(el('control-step').value || '');
   const deviceId = Number(el('control-device').value || 0);
   if (!deviceId) {
     el('control-step').innerHTML = '';
@@ -909,7 +954,11 @@ async function loadControlSteps() {
     const device = await api(`/api/devices/${deviceId}`);
     const protocol = await api(`/api/protocols/${device.protocol_template_id}`);
     state.controlManualSteps = extractManualSteps(protocol.template || {});
-    el('control-step').innerHTML = state.controlManualSteps.map(s => `<option value="${s.id}">${s.name} (${s.id}) [${s.action}]</option>`).join('');
+    const stepSelect = el('control-step');
+    stepSelect.innerHTML = state.controlManualSteps.map(s => `<option value="${s.id}">${s.name} (${s.id}) [${s.action}]</option>`).join('');
+    if (preferredStepId && state.controlManualSteps.some(s => s.id === preferredStepId)) {
+      stepSelect.value = preferredStepId;
+    }
   } catch (e) {
     el('control-result').className = 'err';
     el('control-result').textContent = `加载步骤失败: ${e.message}`;
@@ -1222,7 +1271,7 @@ function bindEvents() {
   el('edit-device-protocol').addEventListener('change', () => applyDeviceTemplateDefaults('edit'));
   el('update-device-btn').addEventListener('click', updateDevice);
   el('test-device-connection-btn').addEventListener('click', testDeviceConnection);
-  el('control-device').addEventListener('change', loadControlSteps);
+  el('control-device').addEventListener('change', () => loadControlSteps({ preferredStepId: '' }));
   el('control-tare').addEventListener('click', () => runControl('tare'));
   el('control-zero').addEventListener('click', () => runControl('zero'));
   el('control-run').addEventListener('click', () => runControl('custom'));
