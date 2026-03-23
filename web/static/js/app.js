@@ -1325,7 +1325,6 @@ async function boot() {
   setInterval(() => {
     if (state.activeTab === 'dashboard') refreshDashboardMetrics();
     if (state.activeTab === 'devices') refreshDevices();
-    if (state.activeTab === 'control') refreshControlDevices();
     if (state.activeTab === 'device-debug') refreshDebugRuntime();
     if (state.activeTab === 'serial-debug') refreshSerialRuntime();
   }, 1200);

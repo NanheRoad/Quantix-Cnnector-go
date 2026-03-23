@@ -49,6 +49,7 @@ func main() {
 		log.Printf("backend start failed: %v", err)
 	}
 
+	desktop.HideDockIcon()
 	a := app.NewWithID("com.quantix.connector")
 	a.Settings().SetTheme(theme.LightTheme())
 	d := &desktopApp{
@@ -82,7 +83,6 @@ func (d *desktopApp) setupTray() {
 		d.showAPIKeyWindow()
 	})
 	menu := fyne.NewMenu("Quantix", openFrontend, openLogs, setAPIKey)
-	desktopCap.SetSystemTrayIcon(theme.ComputerIcon())
 	desktopCap.SetSystemTrayMenu(menu)
 	d.fyneApp.Lifecycle().SetOnStopped(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
