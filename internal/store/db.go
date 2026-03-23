@@ -10,8 +10,8 @@ import (
 	"quantix-connector-go/internal/config"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -40,6 +40,20 @@ func OpenDB(cfg config.Settings) (*gorm.DB, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+	if strings.ToLower(cfg.DBType) == "mysql" {
+		sqlDB.SetMaxOpenConns(20)
+		sqlDB.SetMaxIdleConns(10)
+	} else {
+		// SQLite favors a single writer connection to reduce lock contention.
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
 	}
 
 	if err := db.AutoMigrate(&ProtocolTemplate{}, &Device{}); err != nil {

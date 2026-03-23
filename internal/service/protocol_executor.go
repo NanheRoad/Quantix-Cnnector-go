@@ -158,7 +158,17 @@ func (e *ProtocolExecutor) executeStep(ctx context.Context, drv driver.Driver, s
 	switch {
 	case action == "delay":
 		delayMS := int(anyToFloat(execValueOr(params["milliseconds"], 0)))
-		time.Sleep(time.Duration(delayMS) * time.Millisecond)
+		if delayMS > 0 {
+			timer := time.NewTimer(time.Duration(delayMS) * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
 		raw = map[string]any{"delayed_ms": delayMS}
 	case strings.HasPrefix(action, "transform."):
 		raw, err = runTransform(action, params)
@@ -499,7 +509,7 @@ func evalExpression(expression string, raw any, contextMap map[string]any) (any,
 			}
 			return nil
 		},
-		"str":   func(v any) string { return fmt.Sprintf("%v", v) },
+		"str": func(v any) string { return fmt.Sprintf("%v", v) },
 	}
 	for k, v := range contextMap {
 		env[k] = v

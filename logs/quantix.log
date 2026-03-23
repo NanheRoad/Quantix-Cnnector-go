@@ -21,3 +21,21 @@
 2026/03/23 14:44:53.883592 fallback to signal mode; press Ctrl+C to exit
 2026/03/23 14:49:37.880352 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
 2026/03/23 14:49:37.915777 Quantix server listening on http://127.0.0.1:8000
+2026/03/23 15:18:53.023734 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:18:53.127840 Quantix server listening on http://127.0.0.1:8000
+2026/03/23 15:23:17.749437 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:23:17.777119 open db failed: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+2026/03/23 15:23:34.410254 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:23:34.437005 open db failed: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+2026/03/23 15:34:52.940224 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:34:53.149744 open db failed: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+2026/03/23 15:35:09.136482 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:35:09.268823 open db failed: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+2026/03/23 15:38:14.996244 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:38:15.574609 Quantix server listening on http://127.0.0.1:8000
+2026/03/23 15:38:15.575949 http server error: listen tcp 127.0.0.1:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+2026/03/23 15:38:15.576456 shutdown: http server error
+2026/03/23 15:39:25.706024 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/03/23 15:39:26.069372 Quantix server listening on http://127.0.0.1:8000
+2026/03/23 15:39:26.069372 http server error: listen tcp 127.0.0.1:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+2026/03/23 15:39:26.069944 shutdown: http server error

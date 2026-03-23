@@ -31,6 +31,7 @@ func (d *ModbusDriver) Connect(ctx context.Context) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastErr = ""
+	d.closeUnlocked()
 	host := asString(d.params, "host", "")
 	port := asInt(d.params, "port", 502)
 	if host != "" {
@@ -87,15 +88,7 @@ func (d *ModbusDriver) Connect(ctx context.Context) (bool, error) {
 func (d *ModbusDriver) Disconnect(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.handler != nil {
-		_ = d.handler.Close()
-	}
-	if d.rtu != nil {
-		_ = d.rtu.Close()
-	}
-	d.handler = nil
-	d.rtu = nil
-	d.client = nil
+	d.closeUnlocked()
 	d.connected = false
 	_ = ctx
 	return nil
@@ -141,30 +134,35 @@ func (d *ModbusDriver) ExecuteAction(ctx context.Context, action string, params 
 	case "modbus.read_input_registers":
 		b, err := d.client.ReadInputRegisters(address, count)
 		if err != nil {
+			d.markDisconnectedUnlocked(err)
 			return nil, err
 		}
 		return map[string]any{"registers": bytesToU16(b)}, nil
 	case "modbus.read_holding_registers":
 		b, err := d.client.ReadHoldingRegisters(address, count)
 		if err != nil {
+			d.markDisconnectedUnlocked(err)
 			return nil, err
 		}
 		return map[string]any{"registers": bytesToU16(b)}, nil
 	case "modbus.read_coils":
 		b, err := d.client.ReadCoils(address, count)
 		if err != nil {
+			d.markDisconnectedUnlocked(err)
 			return nil, err
 		}
 		return map[string]any{"coils": bytesToBits(b, int(count))}, nil
 	case "modbus.read_discrete_inputs":
 		b, err := d.client.ReadDiscreteInputs(address, count)
 		if err != nil {
+			d.markDisconnectedUnlocked(err)
 			return nil, err
 		}
 		return map[string]any{"coils": bytesToBits(b, int(count))}, nil
 	case "modbus.write_register":
 		_, err := d.client.WriteSingleRegister(address, value)
 		if err != nil {
+			d.markDisconnectedUnlocked(err)
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil
@@ -175,6 +173,7 @@ func (d *ModbusDriver) ExecuteAction(ctx context.Context, action string, params 
 		}
 		_, err := d.client.WriteSingleCoil(address, coil)
 		if err != nil {
+			d.markDisconnectedUnlocked(err)
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil
@@ -212,6 +211,26 @@ func (d *ModbusDriver) lastErrOr(fallback string) string {
 		return d.lastErr
 	}
 	return fallback
+}
+
+func (d *ModbusDriver) markDisconnectedUnlocked(err error) {
+	d.closeUnlocked()
+	d.connected = false
+	if err != nil {
+		d.lastErr = err.Error()
+	}
+}
+
+func (d *ModbusDriver) closeUnlocked() {
+	if d.handler != nil {
+		_ = d.handler.Close()
+	}
+	if d.rtu != nil {
+		_ = d.rtu.Close()
+	}
+	d.handler = nil
+	d.rtu = nil
+	d.client = nil
 }
 
 func bytesToU16(in []byte) []int {

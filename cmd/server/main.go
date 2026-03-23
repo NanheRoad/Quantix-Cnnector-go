@@ -28,6 +28,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("open db failed: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("open sql db handle failed: %v", err)
+	}
 	manager := service.NewDeviceManager(db, cfg)
 	serialDebug := service.NewSerialDebugService()
 	if err := manager.Startup(context.Background()); err != nil {
@@ -41,12 +45,19 @@ func main() {
 		Addr:              cfg.BackendHost + ":" + itoa(cfg.BackendPort),
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
+	httpErrCh := make(chan error, 1)
 	go func() {
 		log.Printf("Quantix server listening on http://%s", httpServer.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http server error: %v", err)
+			select {
+			case httpErrCh <- err:
+			default:
+			}
 		}
 	}()
 
@@ -63,6 +74,9 @@ func main() {
 			if err := manager.Shutdown(ctx); err != nil {
 				log.Printf("device manager shutdown error: %v", err)
 			}
+			if err := sqlDB.Close(); err != nil {
+				log.Printf("db close error: %v", err)
+			}
 			close(shutdownDone)
 		})
 	}
@@ -72,6 +86,12 @@ func main() {
 	go func() {
 		sig := <-sigCh
 		shutdown("signal: " + sig.String())
+		trayapp.RequestQuit()
+	}()
+	go func() {
+		err := <-httpErrCh
+		log.Printf("http server error: %v", err)
+		shutdown("http server error")
 		trayapp.RequestQuit()
 	}()
 

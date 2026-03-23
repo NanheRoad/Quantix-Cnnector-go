@@ -34,15 +34,22 @@ func (d *MqttDriver) RegisterMessageHandler(handler MessageHandler) {
 func (d *MqttDriver) Connect(ctx context.Context) (bool, error) {
 	d.mu.Lock()
 	d.lastErr = ""
+	oldClient := d.client
+	d.client = nil
+	d.connected = false
 	host := asString(d.params, "host", "127.0.0.1")
 	port := asInt(d.params, "port", 1883)
 	username := asString(d.params, "username", "")
 	password := asString(d.params, "password", "")
 	d.mu.Unlock()
+	if oldClient != nil && oldClient.IsConnectionOpen() {
+		oldClient.Disconnect(100)
+	}
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", host, port))
 	opts.SetClientID(fmt.Sprintf("quantix-%d", time.Now().UnixNano()))
+	opts.SetAutoReconnect(false)
 	if username != "" {
 		opts.SetUsername(username)
 		opts.SetPassword(password)

@@ -1,0 +1,33 @@
+# Go build and test caches
+.gocache/
+.gomodcache/
+*.test
+coverage.out
+
+# Local build outputs
+bin/
+build/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime data
+logs/
+*.log
+*.db
+*.db-shm
+*.db-wal
+
+# Local config and generated backups
+quantix.local.json
+*.bak
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

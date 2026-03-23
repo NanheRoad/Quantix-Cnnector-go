@@ -40,10 +40,12 @@ func (s *Server) websocketStream(c *gin.Context) {
 			if !ok {
 				return
 			}
+			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := conn.WriteJSON(msg); err != nil {
 				return
 			}
 		case <-pingTicker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := conn.WriteJSON(gin.H{"type": "ping"}); err != nil {
 				return
 			}

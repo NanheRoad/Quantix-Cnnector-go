@@ -22,8 +22,11 @@ type deviceRuntime struct {
 	template     store.ProtocolTemplate
 	driver       driver.Driver
 	state        *RuntimeState
+	runCtx       context.Context
+	cancel       context.CancelFunc
 	stopCh       chan struct{}
 	doneCh       chan struct{}
+	stopping     bool
 	ioMu         sync.Mutex
 	dedupeMu     sync.Mutex
 	lastScanCode string
@@ -37,6 +40,7 @@ type DeviceManager struct {
 	bus      *EventBus
 	metrics  *RuntimeMetrics
 	mu       sync.Mutex
+	lifeMu   sync.Mutex
 	runtimes map[uint]*deviceRuntime
 }
 
@@ -72,13 +76,19 @@ func (m *DeviceManager) Shutdown(ctx context.Context) error {
 		ids = append(ids, id)
 	}
 	m.mu.Unlock()
+	var firstErr error
 	for _, id := range ids {
-		_ = m.StopDevice(ctx, id)
+		if err := m.StopDevice(ctx, id); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func (m *DeviceManager) StartDevice(ctx context.Context, deviceID uint) error {
+	m.lifeMu.Lock()
+	defer m.lifeMu.Unlock()
+
 	var device store.Device
 	if err := m.db.First(&device, deviceID).Error; err != nil {
 		return err
@@ -87,16 +97,21 @@ func (m *DeviceManager) StartDevice(ctx context.Context, deviceID uint) error {
 	if err := m.db.First(&tmpl, device.ProtocolTemplateID).Error; err != nil {
 		return fmt.Errorf("missing protocol template for device_id=%d", deviceID)
 	}
-	_ = m.StopDevice(ctx, deviceID)
+	if err := m.stopDeviceLocked(ctx, deviceID); err != nil {
+		return err
+	}
 	drv, err := driver.Build(tmpl.ProtocolType, store.JSONMapToMap(device.ConnectionParams), m.cfg)
 	if err != nil {
 		return err
 	}
+	runCtx, cancel := context.WithCancel(context.Background())
 	rt := &deviceRuntime{
 		device:   device,
 		template: tmpl,
 		driver:   drv,
 		state:    NewRuntimeState(device.ID, device.Name, device.DeviceCode, normalizeCategory(device.DeviceCategory)),
+		runCtx:   runCtx,
+		cancel:   cancel,
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
 	}
@@ -113,19 +128,34 @@ func (m *DeviceManager) StartDevice(ctx context.Context, deviceID uint) error {
 }
 
 func (m *DeviceManager) StopDevice(ctx context.Context, deviceID uint) error {
+	m.lifeMu.Lock()
+	defer m.lifeMu.Unlock()
+	return m.stopDeviceLocked(ctx, deviceID)
+}
+
+func (m *DeviceManager) stopDeviceLocked(ctx context.Context, deviceID uint) error {
 	m.mu.Lock()
 	rt := m.runtimes[deviceID]
+	alreadyStopping := false
 	if rt != nil {
-		delete(m.runtimes, deviceID)
+		alreadyStopping = rt.stopping
+		rt.stopping = true
 	}
 	m.mu.Unlock()
 	if rt == nil {
 		return nil
 	}
-	close(rt.stopCh)
+	if !alreadyStopping {
+		if rt.cancel != nil {
+			rt.cancel()
+		}
+		close(rt.stopCh)
+	}
+	timedOut := false
 	select {
 	case <-rt.doneCh:
 	case <-time.After(2 * time.Second):
+		timedOut = true
 	}
 	_ = rt.driver.Disconnect(ctx)
 	rt.ioMu.Lock()
@@ -133,6 +163,14 @@ func (m *DeviceManager) StopDevice(ctx context.Context, deviceID uint) error {
 	msg := rt.state.ToMessage()
 	rt.ioMu.Unlock()
 	m.publishEvent(msg)
+	m.mu.Lock()
+	if current := m.runtimes[deviceID]; current == rt {
+		delete(m.runtimes, deviceID)
+	}
+	m.mu.Unlock()
+	if timedOut {
+		return fmt.Errorf("device runtime stop timeout: device_id=%d", deviceID)
+	}
 	return nil
 }
 
@@ -156,10 +194,12 @@ func (m *DeviceManager) ExecuteManualStep(ctx context.Context, deviceID uint, st
 	if rt == nil {
 		return nil, fmt.Errorf("Device runtime not found or not enabled")
 	}
+	runCtx, cancel := mergeContext(rt.runCtx, ctx)
+	defer cancel()
 	rt.ioMu.Lock()
 	defer rt.ioMu.Unlock()
 	vars := store.JSONMapToMap(rt.device.TemplateVariables)
-	result, err := m.executor.RunManualStep(ctx, store.JSONMapToMap(rt.template.Template), rt.driver, stepID, vars, paramsOverride, rt.state.StepResults)
+	result, err := m.executor.RunManualStep(runCtx, store.JSONMapToMap(rt.template.Template), rt.driver, stepID, vars, paramsOverride, rt.state.StepResults)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +227,11 @@ func (m *DeviceManager) Unsubscribe(ch chan map[string]any) {
 func (m *DeviceManager) GetRuntime(deviceID uint) *deviceRuntime {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.runtimes[deviceID]
+	rt := m.runtimes[deviceID]
+	if rt != nil && rt.stopping {
+		return nil
+	}
+	return rt
 }
 
 func (m *DeviceManager) RuntimeSnapshot(deviceID uint) map[string]any {
@@ -305,9 +349,10 @@ func (m *DeviceManager) runRuntimeLoop(rt *deviceRuntime) {
 
 		cycleStart := time.Now()
 		stage := "connect"
+		justConnected := false
 		if !rt.driver.IsConnected() {
 			rt.ioMu.Lock()
-			connected, _ := rt.driver.Connect(context.Background())
+			connected, _ := rt.driver.Connect(rt.runCtx)
 			rt.ioMu.Unlock()
 			if !connected {
 				m.metrics.IncReconnect()
@@ -328,13 +373,17 @@ func (m *DeviceManager) runRuntimeLoop(rt *deviceRuntime) {
 				}
 				continue
 			}
+			justConnected = true
 		}
 		backoff = time.Second
+		if justConnected {
+			setupDone = false
+		}
 
 		if !setupDone {
 			stage = "setup"
 			rt.ioMu.Lock()
-			setup, err := m.executor.RunSetupSteps(context.Background(), store.JSONMapToMap(rt.template.Template), rt.driver, store.JSONMapToMap(rt.device.TemplateVariables))
+			setup, err := m.executor.RunSetupSteps(rt.runCtx, store.JSONMapToMap(rt.template.Template), rt.driver, store.JSONMapToMap(rt.device.TemplateVariables))
 			if err != nil {
 				rt.state.MarkError(formatException(stage, rt, err))
 				msg := rt.state.ToMessage()
@@ -377,7 +426,7 @@ func (m *DeviceManager) runRuntimeLoop(rt *deviceRuntime) {
 
 		stage = "poll"
 		rt.ioMu.Lock()
-		steps, err := m.executor.RunPollSteps(context.Background(), templateMap, rt.driver, store.JSONMapToMap(rt.device.TemplateVariables), rt.state.StepResults)
+		steps, err := m.executor.RunPollSteps(rt.runCtx, templateMap, rt.driver, store.JSONMapToMap(rt.device.TemplateVariables), rt.state.StepResults)
 		if err == nil {
 			rt.state.StepResults = steps
 			contextMap := map[string]any{"steps": steps}
@@ -436,7 +485,7 @@ func (m *DeviceManager) handleMqttMessage(rt *deviceRuntime, topic string, paylo
 	started := time.Now()
 	rt.ioMu.Lock()
 	defer rt.ioMu.Unlock()
-	steps, output, err := m.executor.RunMessageHandler(context.Background(), store.JSONMapToMap(rt.template.Template), rt.driver, payload, store.JSONMapToMap(rt.device.TemplateVariables), rt.state.StepResults)
+	steps, output, err := m.executor.RunMessageHandler(rt.runCtx, store.JSONMapToMap(rt.template.Template), rt.driver, payload, store.JSONMapToMap(rt.device.TemplateVariables), rt.state.StepResults)
 	if err != nil {
 		m.metrics.IncPollError()
 		rt.state.MarkError(formatException("mqtt_message:"+topic, rt, err))
@@ -709,4 +758,19 @@ func maxDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+func mergeContext(base, parent context.Context) (context.Context, context.CancelFunc) {
+	if base == nil {
+		base = context.Background()
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(base)
+	stop := context.AfterFunc(parent, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }

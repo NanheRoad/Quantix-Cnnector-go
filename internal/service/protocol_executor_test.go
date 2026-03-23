@@ -1,6 +1,11 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
 
 func TestParseStructResult(t *testing.T) {
 	raw := map[string]any{
@@ -34,5 +39,23 @@ func TestParseStructResult(t *testing.T) {
 	tag, ok := out["tag"].(string)
 	if !ok || tag != "AB" {
 		t.Fatalf("unexpected tag: %#v", out["tag"])
+	}
+}
+
+func TestExecuteStepDelayHonorsContextCancellation(t *testing.T) {
+	exec := NewProtocolExecutor()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	_, err := exec.ExecuteOneStep(ctx, nil, map[string]any{
+		"action": "delay",
+		"params": map[string]any{"milliseconds": 500},
+	}, map[string]any{}, nil, false)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("delay ignored cancellation, elapsed=%v", elapsed)
 	}
 }

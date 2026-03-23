@@ -29,6 +29,10 @@ func (d *SerialDriver) Connect(ctx context.Context) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastErr = ""
+	if d.port != nil {
+		_ = d.port.Close()
+		d.port = nil
+	}
 	portName := asString(d.params, "port", "")
 	if portName == "" {
 		d.lastErr = "serial port is required"
@@ -113,6 +117,8 @@ func (d *SerialDriver) send(params map[string]any) (any, error) {
 	}
 	n, err := d.port.Write(data)
 	if err != nil {
+		_ = d.port.Close()
+		d.port = nil
 		d.connected = false
 		d.lastErr = fmt.Sprintf("serial send failed: %v", err)
 		return nil, err
@@ -139,6 +145,8 @@ func (d *SerialDriver) receive(ctx context.Context, params map[string]any) (any,
 		}
 		n, err := d.port.Read(tmp)
 		if err != nil {
+			_ = d.port.Close()
+			d.port = nil
 			d.connected = false
 			d.lastErr = fmt.Sprintf("serial receive failed: %v", err)
 			return nil, err

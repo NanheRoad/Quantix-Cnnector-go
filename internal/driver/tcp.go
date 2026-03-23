@@ -29,6 +29,10 @@ func (d *TCPDriver) Connect(ctx context.Context) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.lastErr = ""
+	if d.conn != nil {
+		_ = d.conn.Close()
+		d.conn = nil
+	}
 	host := asString(d.params, "host", "")
 	port := asInt(d.params, "port", 0)
 	if host == "" || port <= 0 {
@@ -119,6 +123,8 @@ func (d *TCPDriver) send(ctx context.Context, params map[string]any) (any, error
 		}
 		_, err := d.conn.Write(data)
 		if err != nil {
+			_ = d.conn.Close()
+			d.conn = nil
 			d.connected = false
 			d.lastErr = fmt.Sprintf("tcp send failed: %v", err)
 			return nil, err
@@ -158,9 +164,9 @@ func (d *TCPDriver) send(ctx context.Context, params map[string]any) (any, error
 
 	return map[string]any{
 		"bytes_sent":  len(data),
-		"ack_ok":     ackOK,
+		"ack_ok":      ackOK,
 		"ack_payload": fmt.Sprintf("% x", ackBytes),
-		"ack_text":   ackText,
+		"ack_text":    ackText,
 	}, nil
 }
 
@@ -181,6 +187,8 @@ func (d *TCPDriver) receive(ctx context.Context, params map[string]any) (any, er
 	buf := make([]byte, max(1, size))
 	n, err := d.conn.Read(buf)
 	if err != nil {
+		_ = d.conn.Close()
+		d.conn = nil
 		d.connected = false
 		d.lastErr = fmt.Sprintf("tcp receive failed: %v", err)
 		return nil, err
