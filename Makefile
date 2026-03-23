@@ -2,7 +2,7 @@
 
 # 运行项目
 run:
-	go run cmd/server/main.go
+	CGO_ENABLED=1 go run cmd/server/main.go
 
 # 编译项目
 build:
