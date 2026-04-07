@@ -12,6 +12,7 @@ const state = {
   protocols: [],
   devices: [],
   controlManualSteps: [],
+  printAgent: { config: null, status: null, jobs: [], dirty: false, candidates: [] },
   serialSeq: 0,
   serialLogs: [],
   protocolEditors: {
@@ -78,6 +79,7 @@ function formatTimestamp(raw) {
   if (!raw) return '-';
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return String(raw);
+  if (d.getFullYear() <= 1) return '-';
   const y = d.getFullYear();
   const m = pad2(d.getMonth() + 1);
   const day = pad2(d.getDate());
@@ -94,6 +96,15 @@ function safeParseJSON(text, fallback) {
   } catch {
     return fallback;
   }
+}
+
+async function pickLocalFile(title, filter) {
+  const result = await api('/api/local-files/pick', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, filter }),
+  });
+  return result.path || '';
 }
 
 function normalizeTemplateVarDefault(def) {
@@ -1149,6 +1160,205 @@ async function refreshProtocols() {
   }
 }
 
+function markPrintAgentDirty() {
+  state.printAgent.dirty = true;
+}
+
+async function refreshPrintAgentCandidates(selectedValue = '') {
+  try {
+    const result = await api('/api/print-agent/bartender-candidates');
+    const items = Array.isArray(result.items) ? result.items : [];
+    state.printAgent.candidates = items;
+    const select = el('print-agent-bartender-exe');
+    const options = ['<option value="">自动探测</option>']
+      .concat(items.map(item => `<option value="${escapeHTML(item)}">${escapeHTML(item)}</option>`));
+    if (selectedValue && !items.includes(selectedValue)) {
+      options.push(`<option value="${escapeHTML(selectedValue)}">${escapeHTML(selectedValue)} (当前配置)</option>`);
+    }
+    select.innerHTML = options.join('');
+    select.value = selectedValue || '';
+  } catch (e) {
+    el('print-agent-error').textContent = `加载 BarTender 可执行文件候选失败: ${e.message}`;
+  }
+}
+
+function updateTemplateMappingFromInputs() {
+  const templateCode = el('print-agent-template-code').value.trim();
+  const templatePath = el('print-agent-template-path').value.trim();
+  if (!templateCode) throw new Error('模板编码不能为空');
+  if (!templatePath) throw new Error('模板文件不能为空');
+  const mappings = safeParseJSON(el('print-agent-template-mappings').value, {});
+  mappings[templateCode] = templatePath;
+  el('print-agent-template-mappings').value = pretty(mappings);
+  markPrintAgentDirty();
+}
+
+function renderPrintAgentStatus(status) {
+  if (!status || typeof status !== 'object') {
+    el('print-agent-status').innerHTML = '暂无状态';
+    return;
+  }
+  const cards = [
+    ['启用状态', status.enabled ? '是' : '否'],
+    ['运行状态', status.running ? '运行中' : '未运行'],
+    ['客户端 ID', status.client_id || '-'],
+    ['服务端地址', status.server_url || '-'],
+    ['当前任务', status.current_job_code || '-'],
+    ['成功次数', Number(status.success_count || 0)],
+    ['失败次数', Number(status.failed_count || 0)],
+    ['最近轮询', formatTimestamp(status.last_poll_at)],
+    ['最近成功', formatTimestamp(status.last_success_at)],
+    ['最近错误', status.last_error || '-'],
+  ];
+  el('print-agent-status').innerHTML = `<div class="status-grid">
+    ${cards.map(([label, value]) => `<div class="status-item">
+      <span class="label">${escapeHTML(label)}</span>
+      <span class="value">${escapeHTML(String(value))}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderPrintAgentJobs(items) {
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    el('print-agent-jobs').innerHTML = '<div class="diag">暂无任务记录</div>';
+    return;
+  }
+  el('print-agent-jobs').innerHTML = `<table><thead><tr>
+    <th>时间</th><th>任务编号</th><th>模板编码</th><th>打印机</th><th>状态</th><th>说明</th>
+  </tr></thead><tbody>
+    ${rows.map(item => `<tr>
+      <td>${escapeHTML(formatTimestamp(item.time))}</td>
+      <td>${escapeHTML(item.job_code || item.job_id || '-')}</td>
+      <td>${escapeHTML(item.template_code || '-')}</td>
+      <td>${escapeHTML(item.printer_name || '-')}</td>
+      <td>${escapeHTML(item.status || '-')}</td>
+      <td>${escapeHTML(item.message || '-')}</td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+
+async function refreshPrintAgent(force = false) {
+  try {
+    const [config, status, jobs] = await Promise.all([
+      api('/api/print-agent/config'),
+      api('/api/print-agent/status'),
+      api('/api/print-agent/jobs'),
+    ]);
+    state.printAgent.config = config;
+    state.printAgent.status = status;
+    state.printAgent.jobs = jobs.items || [];
+
+    if (force || !state.printAgent.dirty) {
+      el('print-agent-enabled').value = config.enabled ? 'true' : 'false';
+      el('print-agent-server-url').value = config.server_url || '';
+      el('print-agent-api-key').value = config.agent_api_key || '';
+      el('print-agent-client-id').value = config.client_id || '';
+      el('print-agent-job-type').value = config.job_type || 'bartender';
+      el('print-agent-poll-interval').value = Number(config.poll_interval_ms || 2000);
+      el('print-agent-default-printer').value = config.default_printer_name || '';
+      el('print-agent-template-mappings').value = pretty(config.template_mappings || {});
+      await refreshPrintAgentCandidates(config.bartender_executable || '');
+      state.printAgent.dirty = false;
+    }
+    el('print-agent-error').textContent = '';
+    renderPrintAgentStatus(status);
+    renderPrintAgentJobs(state.printAgent.jobs);
+  } catch (e) {
+    el('print-agent-error').textContent = `加载云打印状态失败: ${e.message}`;
+  }
+}
+
+async function savePrintAgentConfig() {
+  try {
+    const payload = {
+      enabled: el('print-agent-enabled').value === 'true',
+      server_url: el('print-agent-server-url').value.trim(),
+      agent_api_key: el('print-agent-api-key').value.trim(),
+      client_id: el('print-agent-client-id').value.trim(),
+      job_type: el('print-agent-job-type').value.trim() || 'bartender',
+      poll_interval_ms: Number(el('print-agent-poll-interval').value || 2000),
+      default_printer_name: el('print-agent-default-printer').value.trim(),
+      bartender_executable: el('print-agent-bartender-exe').value.trim(),
+      template_mappings: parseJSONOrThrow(el('print-agent-template-mappings').value, '模板映射'),
+    };
+    await api('/api/print-agent/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    el('print-agent-save-result').className = 'ok';
+    el('print-agent-save-result').textContent = '保存成功';
+    state.printAgent.dirty = false;
+    await refreshPrintAgent(true);
+  } catch (e) {
+    el('print-agent-save-result').className = 'err';
+    el('print-agent-save-result').textContent = `保存失败: ${e.message}`;
+  }
+}
+
+async function triggerPrintAgentPollOnce() {
+  try {
+    await api('/api/print-agent/poll-once', { method: 'POST' });
+    el('print-agent-save-result').className = 'ok';
+    el('print-agent-save-result').textContent = '已触发一次轮询';
+    await refreshPrintAgent(true);
+  } catch (e) {
+    el('print-agent-save-result').className = 'err';
+    el('print-agent-save-result').textContent = `触发失败: ${e.message}`;
+  }
+}
+
+async function browseBarTenderExecutable() {
+  try {
+    const selected = await pickLocalFile('选择 BarTender 可执行文件', 'Executable files (*.exe)|*.exe|All files (*.*)|*.*');
+    if (!selected) return;
+    await refreshPrintAgentCandidates(selected);
+    el('print-agent-bartender-exe').value = selected;
+    markPrintAgentDirty();
+    el('print-agent-save-result').className = 'ok';
+    el('print-agent-save-result').textContent = '已选择 BarTender 可执行文件';
+  } catch (e) {
+    el('print-agent-save-result').className = 'err';
+    el('print-agent-save-result').textContent = `选择失败: ${e.message}`;
+  }
+}
+
+async function browseTemplateFile() {
+  try {
+    const selected = await pickLocalFile('选择 BarTender 标签模板', 'BarTender template (*.btw)|*.btw|All files (*.*)|*.*');
+    if (!selected) return;
+    el('print-agent-template-path').value = selected;
+    const templateCodeNode = el('print-agent-template-code');
+    if (!templateCodeNode.value.trim()) {
+      const fileName = selected.split(/[\\/]/).pop() || '';
+      const derivedCode = fileName
+        .replace(/\.btw$/i, '')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase();
+      if (derivedCode) templateCodeNode.value = derivedCode;
+    }
+    markPrintAgentDirty();
+    el('print-agent-save-result').className = 'ok';
+    el('print-agent-save-result').textContent = '已选择模板文件，可点击“加入映射”';
+  } catch (e) {
+    el('print-agent-save-result').className = 'err';
+    el('print-agent-save-result').textContent = `选择失败: ${e.message}`;
+  }
+}
+
+function applyTemplateMapping() {
+  try {
+    updateTemplateMappingFromInputs();
+    el('print-agent-save-result').className = 'ok';
+    el('print-agent-save-result').textContent = '模板映射已写入 JSON，记得点击保存配置';
+  } catch (e) {
+    el('print-agent-save-result').className = 'err';
+    el('print-agent-save-result').textContent = `加入映射失败: ${e.message}`;
+  }
+}
+
 async function createProtocol() {
   try {
     const payload = { ...getProtocolPayload('new'), is_system: false };
@@ -1333,6 +1543,7 @@ function refreshCurrentTab() {
   if (state.activeTab === 'control') refreshControlDevices();
   if (state.activeTab === 'device-debug') refreshDebugDevices();
   if (state.activeTab === 'protocols') refreshProtocols();
+  if (state.activeTab === 'print-agent') refreshPrintAgent(false);
   if (state.activeTab === 'serial-debug') refreshSerialRuntime();
 }
 
@@ -1376,6 +1587,31 @@ function bindEvents() {
   el('delete-protocol-btn').addEventListener('click', deleteProtocol);
   el('step-test-btn').addEventListener('click', runStepTest);
 
+  el('print-agent-save').addEventListener('click', savePrintAgentConfig);
+  el('print-agent-refresh').addEventListener('click', () => refreshPrintAgent(true));
+  el('print-agent-poll-once').addEventListener('click', triggerPrintAgentPollOnce);
+  el('print-agent-bartender-browse').addEventListener('click', browseBarTenderExecutable);
+  el('print-agent-template-browse').addEventListener('click', browseTemplateFile);
+  el('print-agent-template-apply').addEventListener('click', applyTemplateMapping);
+  [
+    'print-agent-enabled',
+    'print-agent-server-url',
+    'print-agent-api-key',
+    'print-agent-client-id',
+    'print-agent-job-type',
+    'print-agent-poll-interval',
+    'print-agent-default-printer',
+    'print-agent-bartender-exe',
+    'print-agent-template-code',
+    'print-agent-template-path',
+    'print-agent-template-mappings',
+  ].forEach(id => {
+    const node = el(id);
+    if (!node) return;
+    node.addEventListener('input', markPrintAgentDirty);
+    node.addEventListener('change', markPrintAgentDirty);
+  });
+
   el('serial-refresh').addEventListener('click', refreshSerialPorts);
   el('serial-open').addEventListener('click', serialOpen);
   el('serial-close').addEventListener('click', serialClose);
@@ -1389,6 +1625,7 @@ async function boot() {
   initProtocolEditors();
   await loadProtocolOptions();
   await refreshDashboardFallback();
+  await refreshPrintAgent(true);
   openDashboardWS();
   await refreshSerialPorts();
   setInterval(() => {
@@ -1399,6 +1636,7 @@ async function boot() {
     if (state.activeTab === 'devices') refreshDevices();
     if (state.activeTab === 'control') refreshControlDevices();
     if (state.activeTab === 'device-debug') refreshDebugRuntime();
+    if (state.activeTab === 'print-agent') refreshPrintAgent();
     if (state.activeTab === 'serial-debug') refreshSerialRuntime();
   }, 1200);
 }

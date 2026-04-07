@@ -240,7 +240,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *service.DeviceManager, conf
 	}
 	manager := service.NewDeviceManager(db, cfg)
 	serialDebug := service.NewSerialDebugService()
-	srv := NewServer(cfg, db, manager, serialDebug)
+	printAgent := service.NewPrintAgentService(cfg.PrintAgent)
+	srv := NewServer(cfg, db, manager, serialDebug, printAgent)
 	ts := httptest.NewServer(srv.Router())
 
 	t.Cleanup(func() {

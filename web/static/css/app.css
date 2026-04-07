@@ -135,6 +135,24 @@ main {
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
+.inline-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.inline-picker > input,
+.inline-picker > select {
+  min-width: 0;
+}
+
+.inline-picker > button {
+  min-width: 72px;
+  height: 100%;
+  white-space: nowrap;
+}
+
 label {
   display: block;
   margin: 4px 0 8px;
@@ -378,6 +396,44 @@ small { color: var(--muted); }
   background: #f4f8ff;
   font-size: 13px;
   color: #28426f;
+  line-height: 1.55;
+}
+
+.muted-box {
+  margin: 6px 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f7faff;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.status-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(183, 198, 227, 0.85);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.status-item .label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-item .value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d3d70;
 }
 
 .card {
@@ -450,6 +506,12 @@ pre {
   #tabs { justify-content: flex-start; }
   .grid-2,
   .grid-3 {
+    grid-template-columns: 1fr;
+  }
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+  .inline-picker {
     grid-template-columns: 1fr;
   }
   .row > * {

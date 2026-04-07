@@ -34,11 +34,13 @@ func main() {
 	}
 	manager := service.NewDeviceManager(db, cfg)
 	serialDebug := service.NewSerialDebugService()
+	printAgent := service.NewPrintAgentService(cfg.PrintAgent)
 	if err := manager.Startup(context.Background()); err != nil {
 		log.Fatalf("device manager startup failed: %v", err)
 	}
+	printAgent.Start(context.Background())
 
-	server := api.NewServer(cfg, db, manager, serialDebug)
+	server := api.NewServer(cfg, db, manager, serialDebug, printAgent)
 	router := server.Router()
 
 	httpServer := &http.Server{
@@ -73,6 +75,9 @@ func main() {
 			}
 			if err := manager.Shutdown(ctx); err != nil {
 				log.Printf("device manager shutdown error: %v", err)
+			}
+			if err := printAgent.Shutdown(ctx); err != nil {
+				log.Printf("print agent shutdown error: %v", err)
 			}
 			if err := sqlDB.Close(); err != nil {
 				log.Printf("db close error: %v", err)

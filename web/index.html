@@ -18,6 +18,7 @@
     <button class="tab-btn" data-tab="control">手动控制</button>
     <button class="tab-btn" data-tab="device-debug">设备调试</button>
     <button class="tab-btn" data-tab="protocols">协议模板</button>
+    <button class="tab-btn" data-tab="print-agent">云打印</button>
     <button class="tab-btn" data-tab="serial-debug">串口调试</button>
   </div>
 </header>
@@ -177,6 +178,54 @@
       <label><input id="step-test-allow-write" type="checkbox" style="width:auto"/> 允许写操作(allow_write)</label>
       <button id="step-test-btn" class="btn-pri">执行测试</button>
       <pre id="step-test-result">{}</pre>
+    </div>
+  </section>
+
+  <section class="page" id="page-print-agent">
+    <div class="panel">
+      <h3>云打印代理</h3>
+      <div id="print-agent-status" class="diag"></div>
+      <div id="print-agent-error" class="err"></div>
+      <div class="grid-2">
+        <div><label>启用云打印</label><select id="print-agent-enabled"><option value="true">是(true)</option><option value="false">否(false)</option></select></div>
+        <div><label>Quantix 服务地址</label><input id="print-agent-server-url" placeholder="http://127.0.0.1:8050" /></div>
+        <div><label>打印代理 API Key</label><input id="print-agent-api-key" placeholder="对应 Quantix 的 PRINT_AGENT_API_KEY" /></div>
+        <div><label>客户端 ID</label><input id="print-agent-client-id" placeholder="例如 TSC-CLIENT-01" /></div>
+        <div><label>任务类型</label><select id="print-agent-job-type"><option value="bartender">BarTender</option></select></div>
+        <div><label>轮询间隔(ms)</label><input id="print-agent-poll-interval" type="number" value="2000" /></div>
+        <div><label>默认打印机名称</label><input id="print-agent-default-printer" placeholder="Bar Code Printer T-4503E" /></div>
+        <div>
+          <label>BarTender 可执行文件</label>
+          <div class="inline-picker">
+            <select id="print-agent-bartender-exe"><option value="">自动探测</option></select>
+            <button id="print-agent-bartender-browse" type="button" class="btn-sec">选择文件</button>
+          </div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div><label>模板编码</label><input id="print-agent-template-code" placeholder="例如 material_label_v1" value="material_label_v1" /></div>
+        <div>
+          <label>模板文件(.btw)</label>
+          <div class="inline-picker">
+            <input id="print-agent-template-path" placeholder="请选择本机 .btw 文件" readonly />
+            <button id="print-agent-template-browse" type="button" class="btn-sec">选择文件</button>
+            <button id="print-agent-template-apply" type="button">加入映射</button>
+          </div>
+        </div>
+      </div>
+      <div class="muted-box">模板文件和 BarTender 可执行文件都在本机连接器里选择。Quantix 服务端只下发模板编码和打印数据，不保存客户端文件路径。</div>
+      <label>模板映射(JSON)</label>
+      <textarea id="print-agent-template-mappings" rows="6">{"material_label_v1":"D:/Code/Quantix/文档1.btw"}</textarea>
+      <div class="row">
+        <button id="print-agent-save" class="btn-pri">保存配置</button>
+        <button id="print-agent-refresh">刷新状态</button>
+        <button id="print-agent-poll-once" class="btn-sec">立即轮询一次</button>
+        <span id="print-agent-save-result"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>最近打印任务</h3>
+      <div id="print-agent-jobs"></div>
     </div>
   </section>
 

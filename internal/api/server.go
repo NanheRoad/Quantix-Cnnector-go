@@ -19,13 +19,14 @@ type Server struct {
 	db          *gorm.DB
 	manager     *service.DeviceManager
 	serialDebug *service.SerialDebugService
+	printAgent  *service.PrintAgentService
 	webFS       fs.FS
 	staticFS    http.FileSystem
 	apiKey      atomic.Value
 }
 
-func NewServer(cfg config.Settings, db *gorm.DB, manager *service.DeviceManager, serialDebug *service.SerialDebugService) *Server {
-	s := &Server{cfg: cfg, db: db, manager: manager, serialDebug: serialDebug}
+func NewServer(cfg config.Settings, db *gorm.DB, manager *service.DeviceManager, serialDebug *service.SerialDebugService, printAgent *service.PrintAgentService) *Server {
+	s := &Server{cfg: cfg, db: db, manager: manager, serialDebug: serialDebug, printAgent: printAgent}
 	s.apiKey.Store(strings.TrimSpace(cfg.APIKey))
 	webFS, err := webembed.WebFS()
 	if err == nil {
@@ -60,6 +61,8 @@ func (s *Server) Router() *gin.Engine {
 	s.registerProtocolRoutes(protected)
 	s.registerCategoryRoutes(protected)
 	s.registerSerialDebugRoutes(protected)
+	s.registerPrintAgentRoutes(protected)
+	s.registerLocalFileRoutes(protected)
 	return r
 }
 

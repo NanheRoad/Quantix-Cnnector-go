@@ -64,6 +64,11 @@ go run ./cmd/server
   - `POST /api/protocols/{id}/test-step`
 - 串口调试：
   - `/api/serial-debug/ports|status|open|close|send|read|logs`
+- 云打印代理：
+  - `GET /api/print-agent/status`
+  - `GET/PUT /api/print-agent/config`
+  - `GET /api/print-agent/jobs`
+  - `POST /api/print-agent/poll-once`
 
 鉴权方式：
 
@@ -84,6 +89,40 @@ go run ./cmd/server
 - `TSC-TCP-Print`
 - `Serial-Scanner-LineMode`
 - `Serial-Board-Polling`
+
+## 6.1 云打印代理（BarTender）
+
+连接器已内置 Quantix 云打印代理，适用于：
+
+- Quantix 服务端创建打印任务
+- 本地连接器轮询任务
+- 本机调用 BarTender 2022 打印 `.btw` 模板
+
+推荐做法：
+
+- `.btw` 模板放在客户端本机
+- 在连接器 Web 页面“云打印”页签里配置：
+  - Quantix 服务地址
+  - `PRINT_AGENT_API_KEY`
+  - 客户端 ID
+  - 默认打印机名称
+  - BarTender 可执行文件路径
+  - `template_code -> 本地 .btw 路径` 映射
+
+例如模板映射：
+
+```json
+{
+  "material_label_v1": "D:/Code/Quantix/文档1.btw"
+}
+```
+
+这样 Quantix 服务端只需要下发：
+
+- `template_code=material_label_v1`
+- `named_data`
+
+连接器会在本地把任务映射到对应 `.btw` 模板并执行打印。
 
 ## 7. Modbus TCP 本地联调
 
