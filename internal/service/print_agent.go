@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,6 +206,9 @@ func (s *PrintAgentService) TriggerPoll() error {
 		return fmt.Errorf("print agent is disabled")
 	}
 	_, err := s.pollOnce(context.Background(), cfg)
+	if isContextCanceledErr(err) {
+		return nil
+	}
 	return err
 }
 
@@ -220,6 +225,9 @@ func (s *PrintAgentService) loop(ctx context.Context, cfg config.PrintAgentSetti
 		}
 		claimed, err := s.pollOnce(ctx, cfg)
 		if err != nil {
+			if isContextCanceledErr(err) {
+				return
+			}
 			s.setError(err)
 			select {
 			case <-ctx.Done():
@@ -248,6 +256,9 @@ func (s *PrintAgentService) pollOnce(ctx context.Context, cfg config.PrintAgentS
 		return false, err
 	}
 	if task == nil {
+		s.mu.Lock()
+		s.status.LastError = ""
+		s.mu.Unlock()
 		return false, nil
 	}
 	s.mu.Lock()
@@ -375,6 +386,10 @@ func (s *PrintAgentService) doJSON(ctx context.Context, cfg config.PrintAgentSet
 	req.Header.Set("X-Print-Agent-Key", cfg.AgentAPIKey)
 	resp, err := s.client.Do(req)
 	if err != nil {
+		msg := strings.TrimSpace(err.Error())
+		if strings.Contains(strings.ToLower(msg), "eof") && !serverURLHasExplicitPort(cfg.ServerURL) {
+			return fmt.Errorf("%s (hint: Quantix 服务地址可能缺少端口，请尝试 http://<host>:8050)", msg)
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -386,6 +401,33 @@ func (s *PrintAgentService) doJSON(ctx context.Context, cfg config.PrintAgentSet
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+func serverURLHasExplicitPort(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSpace(u.Host)
+	if host == "" {
+		return false
+	}
+	if strings.Contains(host, "]") {
+		return strings.Contains(host, "]:")
+	}
+	parts := strings.Split(host, ":")
+	return len(parts) >= 2
+}
+
+func isContextCanceledErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "context canceled")
 }
 
 func (s *PrintAgentService) executeTask(task *remotePrintJob, cfg config.PrintAgentSettings) (map[string]any, error) {
