@@ -47,40 +47,42 @@ func ListBarTenderExecutableCandidates() []string {
 }
 
 type PrintAgentStatus struct {
-	Enabled         bool      `json:"enabled"`
-	Running         bool      `json:"running"`
-	ServerURL       string    `json:"server_url"`
-	ClientID        string    `json:"client_id"`
-	JobType         string    `json:"job_type"`
-	LastPollAt      time.Time `json:"last_poll_at"`
-	LastSuccessAt   time.Time `json:"last_success_at"`
-	LastErrorAt     time.Time `json:"last_error_at"`
-	LastError       string    `json:"last_error"`
-	CurrentJobCode  string    `json:"current_job_code"`
-	ClaimedCount    int       `json:"claimed_count"`
-	SuccessCount    int       `json:"success_count"`
-	FailedCount     int       `json:"failed_count"`
+	Enabled        bool      `json:"enabled"`
+	Running        bool      `json:"running"`
+	WorkerCount    int       `json:"worker_count"`
+	ActiveJobs     int       `json:"active_jobs"`
+	ServerURL      string    `json:"server_url"`
+	ClientID       string    `json:"client_id"`
+	JobType        string    `json:"job_type"`
+	LastPollAt     time.Time `json:"last_poll_at"`
+	LastSuccessAt  time.Time `json:"last_success_at"`
+	LastErrorAt    time.Time `json:"last_error_at"`
+	LastError      string    `json:"last_error"`
+	CurrentJobCode string    `json:"current_job_code"`
+	ClaimedCount   int       `json:"claimed_count"`
+	SuccessCount   int       `json:"success_count"`
+	FailedCount    int       `json:"failed_count"`
 }
 
 type PrintAgentJobRecord struct {
-	Time          time.Time      `json:"time"`
-	JobID         int            `json:"job_id"`
-	JobCode       string         `json:"job_code"`
-	TemplateCode  string         `json:"template_code"`
-	PrinterName   string         `json:"printer_name"`
-	Status        string         `json:"status"`
-	Message       string         `json:"message"`
-	Result        map[string]any `json:"result"`
+	Time         time.Time      `json:"time"`
+	JobID        int            `json:"job_id"`
+	JobCode      string         `json:"job_code"`
+	TemplateCode string         `json:"template_code"`
+	PrinterName  string         `json:"printer_name"`
+	Status       string         `json:"status"`
+	Message      string         `json:"message"`
+	Result       map[string]any `json:"result"`
 }
 
 type PrintAgentService struct {
-	mu       sync.Mutex
-	cfg      config.PrintAgentSettings
-	status   PrintAgentStatus
-	history  []PrintAgentJobRecord
-	cancel   context.CancelFunc
-	done     chan struct{}
-	client   *http.Client
+	mu      sync.Mutex
+	cfg     config.PrintAgentSettings
+	status  PrintAgentStatus
+	history []PrintAgentJobRecord
+	cancel  context.CancelFunc
+	done    chan struct{}
+	client  *http.Client
 }
 
 func NewPrintAgentService(cfg config.PrintAgentSettings) *PrintAgentService {
@@ -88,10 +90,11 @@ func NewPrintAgentService(cfg config.PrintAgentSettings) *PrintAgentService {
 	return &PrintAgentService{
 		cfg: cfg,
 		status: PrintAgentStatus{
-			Enabled:   cfg.Enabled,
-			ServerURL: cfg.ServerURL,
-			ClientID:  cfg.ClientID,
-			JobType:   cfg.JobType,
+			Enabled:     cfg.Enabled,
+			ServerURL:   cfg.ServerURL,
+			ClientID:    cfg.ClientID,
+			JobType:     cfg.JobType,
+			WorkerCount: cfg.MaxConcurrentJobs,
 		},
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
@@ -110,6 +113,7 @@ func (s *PrintAgentService) Shutdown(ctx context.Context) error {
 	s.cancel = nil
 	s.done = nil
 	s.status.Running = false
+	s.status.ActiveJobs = 0
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -132,11 +136,13 @@ func (s *PrintAgentService) UpdateConfig(ctx context.Context, cfg config.PrintAg
 	s.status.ServerURL = cfg.ServerURL
 	s.status.ClientID = cfg.ClientID
 	s.status.JobType = cfg.JobType
+	s.status.WorkerCount = cfg.MaxConcurrentJobs
 	cancel := s.cancel
 	done := s.done
 	s.cancel = nil
 	s.done = nil
 	s.status.Running = false
+	s.status.ActiveJobs = 0
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -157,20 +163,34 @@ func (s *PrintAgentService) startLocked(_ context.Context, cfg config.PrintAgent
 	if !cfg.Enabled {
 		return
 	}
+	workerCount := cfg.MaxConcurrentJobs
+	if workerCount <= 0 {
+		workerCount = 1
+	}
 	loopCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	s.cancel = cancel
 	s.done = done
 	s.status.Running = true
-	go func(localCfg config.PrintAgentSettings) {
+	s.status.WorkerCount = workerCount
+	go func(localCfg config.PrintAgentSettings, workers int) {
 		defer close(done)
-		s.loop(loopCtx, localCfg)
+		var wg sync.WaitGroup
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.loop(loopCtx, localCfg)
+			}()
+		}
+		wg.Wait()
 		s.mu.Lock()
 		if s.done == done {
 			s.status.Running = false
+			s.status.ActiveJobs = 0
 		}
 		s.mu.Unlock()
-	}(cfg)
+	}(cfg, workerCount)
 }
 
 func (s *PrintAgentService) CurrentConfig() config.PrintAgentSettings {
@@ -239,10 +259,15 @@ func (s *PrintAgentService) loop(ctx context.Context, cfg config.PrintAgentSetti
 		if claimed {
 			continue
 		}
+		idleSleep := interval
+		if cfg.LongPollMS > 0 && idleSleep > 500*time.Millisecond {
+			// Long-poll already blocks on server; avoid stacking another long idle wait.
+			idleSleep = 500 * time.Millisecond
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(idleSleep):
 		}
 	}
 }
@@ -256,15 +281,23 @@ func (s *PrintAgentService) pollOnce(ctx context.Context, cfg config.PrintAgentS
 		return false, err
 	}
 	if task == nil {
-		s.mu.Lock()
-		s.status.LastError = ""
-		s.mu.Unlock()
 		return false, nil
 	}
 	s.mu.Lock()
 	s.status.ClaimedCount++
 	s.status.CurrentJobCode = task.JobCode
+	s.status.ActiveJobs++
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.status.ActiveJobs > 0 {
+			s.status.ActiveJobs--
+		}
+		if strings.TrimSpace(s.status.CurrentJobCode) == strings.TrimSpace(task.JobCode) {
+			s.status.CurrentJobCode = ""
+		}
+		s.mu.Unlock()
+	}()
 	result, execErr := s.executeTask(task, cfg)
 	if execErr != nil {
 		_ = s.reportFailed(ctx, cfg, task, execErr.Error(), result)
@@ -282,7 +315,6 @@ func (s *PrintAgentService) pollOnce(ctx context.Context, cfg config.PrintAgentS
 		s.status.FailedCount++
 		s.status.LastErrorAt = time.Now()
 		s.status.LastError = execErr.Error()
-		s.status.CurrentJobCode = ""
 		s.mu.Unlock()
 		return true, nil
 	}
@@ -303,7 +335,6 @@ func (s *PrintAgentService) pollOnce(ctx context.Context, cfg config.PrintAgentS
 	s.status.SuccessCount++
 	s.status.LastSuccessAt = time.Now()
 	s.status.LastError = ""
-	s.status.CurrentJobCode = ""
 	s.mu.Unlock()
 	return true, nil
 }
@@ -338,9 +369,12 @@ func (s *PrintAgentService) claimNextJob(ctx context.Context, cfg config.PrintAg
 		"client_id": cfg.ClientID,
 		"job_type":  cfg.JobType,
 	}
+	if cfg.LongPollMS > 0 {
+		body["wait_ms"] = cfg.LongPollMS
+	}
 	var resp struct {
-		Success bool           `json:"success"`
-		Message string         `json:"message"`
+		Success bool            `json:"success"`
+		Message string          `json:"message"`
 		Data    *remotePrintJob `json:"data"`
 	}
 	if err := s.doJSON(ctx, cfg, http.MethodPost, cfg.ServerURL+"/api/print-jobs/next", body, &resp); err != nil {
@@ -497,6 +531,8 @@ func normalizeAgentCfg(cfg config.PrintAgentSettings) config.PrintAgentSettings 
 		DefaultPrinterName:  strings.TrimSpace(cfg.DefaultPrinterName),
 		BartenderExecutable: strings.TrimSpace(cfg.BartenderExecutable),
 		PollIntervalMS:      cfg.PollIntervalMS,
+		LongPollMS:          cfg.LongPollMS,
+		MaxConcurrentJobs:   cfg.MaxConcurrentJobs,
 		TemplateMappings:    cloneStringMap(cfg.TemplateMappings),
 	}
 }

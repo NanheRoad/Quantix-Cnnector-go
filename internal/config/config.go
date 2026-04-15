@@ -26,15 +26,17 @@ type Settings struct {
 }
 
 type PrintAgentSettings struct {
-	Enabled            bool              `json:"enabled"`
-	ServerURL          string            `json:"server_url"`
-	AgentAPIKey        string            `json:"agent_api_key"`
-	ClientID           string            `json:"client_id"`
-	JobType            string            `json:"job_type"`
-	DefaultPrinterName string            `json:"default_printer_name"`
-	BartenderExecutable string           `json:"bartender_executable"`
-	PollIntervalMS     int               `json:"poll_interval_ms"`
-	TemplateMappings   map[string]string `json:"template_mappings"`
+	Enabled             bool              `json:"enabled"`
+	ServerURL           string            `json:"server_url"`
+	AgentAPIKey         string            `json:"agent_api_key"`
+	ClientID            string            `json:"client_id"`
+	JobType             string            `json:"job_type"`
+	DefaultPrinterName  string            `json:"default_printer_name"`
+	BartenderExecutable string            `json:"bartender_executable"`
+	PollIntervalMS      int               `json:"poll_interval_ms"`
+	LongPollMS          int               `json:"long_poll_ms"`
+	MaxConcurrentJobs   int               `json:"max_concurrent_jobs"`
+	TemplateMappings    map[string]string `json:"template_mappings"`
 }
 
 func Load() Settings {
@@ -122,6 +124,15 @@ func normalizePrintAgentSettings(in PrintAgentSettings) PrintAgentSettings {
 	out.BartenderExecutable = strings.TrimSpace(out.BartenderExecutable)
 	if out.PollIntervalMS <= 0 {
 		out.PollIntervalMS = 2000
+	}
+	if out.LongPollMS <= 0 {
+		out.LongPollMS = 15000
+	}
+	if out.MaxConcurrentJobs <= 0 {
+		out.MaxConcurrentJobs = 1
+	}
+	if out.MaxConcurrentJobs > 8 {
+		out.MaxConcurrentJobs = 8
 	}
 	if out.TemplateMappings == nil {
 		out.TemplateMappings = map[string]string{}
