@@ -100,3 +100,20 @@
 2026/04/08 15:55:29.031726 shutdown: signal: interrupt
 2026/04/08 15:55:29.044553 tray unavailable: exit status 1
 2026/04/08 15:55:29.044553 fallback to signal mode; press Ctrl+C to exit
+2026/04/21 15:09:47.107850 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/04/21 15:09:47.148207 Quantix server listening on http://127.0.0.1:8000
+2026/04/21 16:28:43.644365 shutdown: signal: terminated
+2026/04/21 16:28:43.676330 tray unavailable: exit status 1
+2026/04/21 16:28:43.676330 fallback to signal mode; press Ctrl+C to exit
+2026/04/22 08:58:19.082819 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/04/22 08:58:19.125624 Quantix server listening on http://127.0.0.1:8000
+2026/04/22 09:02:44.952221 shutdown: signal: interrupt
+2026/04/22 09:02:44.969770 tray unavailable: exit status 1
+2026/04/22 09:02:44.969770 fallback to signal mode; press Ctrl+C to exit
+2026/04/22 09:02:48.562509 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/04/22 09:02:48.602409 Quantix server listening on http://127.0.0.1:8000
+2026/04/22 09:32:01.015262 shutdown: signal: interrupt
+2026/04/22 09:32:01.026645 tray unavailable: exit status 1
+2026/04/22 09:32:01.027159 fallback to signal mode; press Ctrl+C to exit
+2026/04/22 09:32:12.863357 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
+2026/04/22 09:32:12.907376 Quantix server listening on http://127.0.0.1:8000

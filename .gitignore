@@ -31,3 +31,9 @@ quantix.local.json
 *.swo
 .DS_Store
 Thumbs.db
+
+.codex-gocache
+.codex-gomodcache
+
+
+*.log

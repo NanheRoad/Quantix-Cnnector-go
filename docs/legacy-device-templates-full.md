@@ -1,9 +1,4 @@
-# 旧项目设备模板全集（文档内联版）
-
-来源目录：`/Users/n/Code/Quantix-Cnnector/docs`
-整理日期：2026-03-21
-
-说明：以下模板已全部内联在本文档中，不依赖单独 JSON 文件。
+# 设备模板全集
 
 ## 1. 标准 Modbus 电子台秤
 
@@ -888,6 +883,355 @@
     "weight": "${steps.read_weight.result}",
     "unit": "${unit}",
     "decimals": "${decimals}"
+  }
+}
+```
+
+## 16. 梅特勒托利多 MT-SICS TCP 低延迟模板（新增）
+
+### 16.1 场景说明
+
+本节用于梅特勒托利多台秤/天平通过 MT-SICS 协议、TCP Server 模式接入 Quantix Connector 的场景。
+
+本次现场已验证联通参数：
+
+- 设备协议：`MT-SICS`
+- 传输方式：`TCP`
+- 设备地址：`192.168.3.22`
+- 端口：`9761`
+
+目标：
+
+- 低延迟读取当前重量
+- 保留手动去皮/清零能力
+- 避免串口调试助手中常见的乱码、半包、粘包误判
+
+### 16.2 为什么选 `SIU`
+
+本模板默认读取命令使用：
+
+```text
+SIU\r\n
+```
+
+原因：
+
+- `SIU`：立即返回当前单位重量
+- `S`：等待稳定值，延迟更高
+- `SI`：也可立即返回，但当前场景明确要求按当前单位读取，因此优先 `SIU`
+- `SIR` / `SR`：更适合连续流式输出，不适合当前执行器的请求-响应式轮询模型
+
+结论：
+
+- 如果目标是“响应速度优先、延迟尽量低”，推荐 `SIU`
+- 如果后续业务改成“只关心稳定值”，再切换 `S`
+
+### 16.3 推荐创建设备方式
+
+协议模板建议：
+
+- 模板名称：`MT-SICS-TCP-Scale`
+- 协议类型：`tcp`
+- 设备分类：`weight`
+
+连接参数：
+
+```json
+{
+  "host": "192.168.3.22",
+  "port": 9761
+}
+```
+
+模板变量：
+
+```json
+{
+  "read_command": "SIU\r\n",
+  "tare_command": "T\r\n",
+  "zero_command": "Z\r\n",
+  "receive_size": 64,
+  "timeout_ms": 80,
+  "line_pattern": "^[A-Z]{1,3}\\s+([A-Z])\\s+([-+]?[0-9]+(?:\\.[0-9]+)?)\\s+([A-Za-z]+)"
+}
+```
+
+设备运行建议：
+
+```json
+{
+  "device_category": "weight",
+  "poll_interval": 0.05,
+  "enabled": true
+}
+```
+
+说明：
+
+- `poll_interval=0.05` 表示 50ms 轮询一次
+- 若现场网络稳定、秤响应很快，可压到 `0.03`
+- 若现场存在偶发超时，可回调到 `0.08 ~ 0.10`
+
+### 16.4 模板变量解释
+
+- `read_command`
+  - 默认 `SIU\r\n`
+  - 用于轮询读取当前单位重量
+- `tare_command`
+  - 默认 `T\r\n`
+  - 手动去皮
+- `zero_command`
+  - 默认 `Z\r\n`
+  - 手动清零
+- `receive_size`
+  - 默认 `64`
+  - 单次读取响应的缓冲区大小
+  - MT-SICS 文本响应通常较短，64 足够
+- `timeout_ms`
+  - 默认 `80`
+  - 单次 TCP 读取超时
+  - 低延迟场景建议从 80ms 开始
+- `line_pattern`
+  - 默认：
+    `^[A-Z]{1,3}\s+([A-Z])\s+([-+]?[0-9]+(?:\.[0-9]+)?)\s+([A-Za-z]+)`
+  - 用于提取：
+    - 第 1 组：状态位
+    - 第 2 组：重量值
+    - 第 3 组：单位
+
+### 16.5 响应格式说明
+
+根据 MT-SICS 文档，典型返回示例类似：
+
+```text
+S S 0.256 g
+```
+
+含义可理解为：
+
+- 第 1 列：命令/响应前缀
+- 第 2 列：状态位
+- 第 3 列：重量值
+- 第 4 列：单位
+
+本模板提取策略：
+
+- `parse_status` 提取状态位
+- `parse_weight` 提取重量数值并转为数值类型
+- `parse_unit` 提取单位
+
+### 16.6 输出字段说明
+
+模板最终输出：
+
+```json
+"output": {
+  "weight": "${steps.parse_weight.result}",
+  "unit": "${steps.parse_unit.result}",
+  "decimals": 3,
+  "stability": "${steps.parse_status.result}",
+  "raw_payload": "${steps.read_resp.result.payload}",
+  "transport": "tcp",
+  "protocol": "mt-sics"
+}
+```
+
+字段说明：
+
+- `weight`
+  - 当前解析出的重量值
+- `unit`
+  - 当前单位，例如 `g`、`kg`
+- `decimals`
+  - 固定为 `3`
+  - 用于前端把 `0` 显示成 `0.000`
+- `stability`
+  - 当前响应中的状态位
+- `raw_payload`
+  - 原始响应文本
+  - 联调排错时非常有用
+- `transport`
+  - 固定 `tcp`
+- `protocol`
+  - 固定 `mt-sics`
+
+### 16.7 低延迟调优建议
+
+推荐起始配置：
+
+- `poll_interval = 0.05`
+- `timeout_ms = 80`
+- `receive_size = 64`
+
+如果你要继续压低延迟，建议按这个顺序试：
+
+1. 保持 `timeout_ms=80`，把 `poll_interval` 从 `0.05` 压到 `0.03`
+2. 如果出现偶发超时，把 `timeout_ms` 提到 `100` 或 `120`
+3. 如果现场网络抖动明显，把 `poll_interval` 回调到 `0.08`
+
+不建议的做法：
+
+- 每次连接都发送 `@`
+  - 会清除皮重并重置设备状态
+- 默认改成 `S`
+  - 会等待稳定，读数延迟上升
+- 使用持续输出命令去适配当前轮询引擎
+  - 容易造成报文边界管理复杂化
+
+### 16.8 关于乱码
+
+如果你在串口调试助手中偶尔看到乱码，通常不一定是设备真的发错了，而更常见是：
+
+- 显示编码不对
+- CR/LF 行结束符处理不一致
+- 半包读取
+- 粘包显示
+- 串口参数不匹配
+
+本模板采用 TCP ASCII 文本方式，处理逻辑更稳定：
+
+- 发送 ASCII 查询命令
+- 读取一段短文本响应
+- 用正则提取状态、重量、单位
+- 保留 `raw_payload` 供联调排查
+
+### 16.9 常见异常与排查
+
+如果出现连接异常，优先检查：
+
+1. 是否误用了 `modbus_tcp` 模板
+2. 协议模板 `protocol_type` 是否为 `tcp`
+3. 连接参数是否为：
+   - `host=192.168.3.22`
+   - `port=9761`
+4. 是否把整个“导入包 JSON”粘进了协议编辑器，而不是模板本体
+
+典型错误：
+
+```text
+stage=poll; protocol=modbus_tcp; endpoint=192.168.3.22:9761; error=modbus: length in response header ...
+```
+
+这通常表示：
+
+- 设备本身没问题
+- 但运行时驱动仍然按 Modbus TCP 在解析 MT-SICS 文本
+
+### 16.10 可直接使用的模板
+
+```json
+{
+  "name": "MT-SICS-TCP-Scale",
+  "description": "Mettler Toledo SICS scale over TCP; optimized for low-latency polling with SIU command",
+  "protocol_type": "tcp",
+  "variables": [
+    { "name": "read_command", "type": "string", "default": "SIU\r\n", "label": "Read Command" },
+    { "name": "tare_command", "type": "string", "default": "T\r\n", "label": "Tare Command" },
+    { "name": "zero_command", "type": "string", "default": "Z\r\n", "label": "Zero Command" },
+    { "name": "receive_size", "type": "int", "default": 64, "label": "Receive Size" },
+    { "name": "timeout_ms", "type": "int", "default": 80, "label": "Timeout ms" },
+    {
+      "name": "line_pattern",
+      "type": "string",
+      "default": "^[A-Z]{1,3}\\s+([A-Z])\\s+([-+]?[0-9]+(?:\\.[0-9]+)?)\\s+([A-Za-z]+)",
+      "label": "SICS Line Pattern"
+    }
+  ],
+  "steps": [
+    {
+      "id": "send_read",
+      "name": "Send SIU",
+      "trigger": "poll",
+      "action": "tcp.send",
+      "params": {
+        "data": "${read_command}",
+        "encoding": "ascii"
+      }
+    },
+    {
+      "id": "read_resp",
+      "name": "Read SICS Response",
+      "trigger": "poll",
+      "action": "tcp.receive",
+      "params": {
+        "size": "${receive_size}",
+        "timeout": "${timeout_ms}"
+      }
+    },
+    {
+      "id": "parse_status",
+      "name": "Parse Status",
+      "trigger": "poll",
+      "action": "transform.regex_extract",
+      "params": {
+        "input": "${steps.read_resp.result.payload}",
+        "pattern": "${line_pattern}",
+        "group": 1
+      }
+    },
+    {
+      "id": "parse_weight",
+      "name": "Parse Weight",
+      "trigger": "poll",
+      "action": "transform.regex_extract",
+      "params": {
+        "input": "${steps.read_resp.result.payload}",
+        "pattern": "${line_pattern}",
+        "group": 2
+      },
+      "parse": {
+        "type": "expression",
+        "expression": "float(payload)"
+      }
+    },
+    {
+      "id": "parse_unit",
+      "name": "Parse Unit",
+      "trigger": "poll",
+      "action": "transform.regex_extract",
+      "params": {
+        "input": "${steps.read_resp.result.payload}",
+        "pattern": "${line_pattern}",
+        "group": 3
+      }
+    },
+    {
+      "id": "tare",
+      "name": "Tare",
+      "trigger": "manual",
+      "action": "tcp.send",
+      "params": {
+        "data": "${tare_command}",
+        "encoding": "ascii",
+        "wait_ack": true,
+        "ack_timeout": "${timeout_ms}",
+        "ack_size": "${receive_size}",
+        "ack_pattern": "^[A-Z]{1,3}.*"
+      }
+    },
+    {
+      "id": "zero",
+      "name": "Zero",
+      "trigger": "manual",
+      "action": "tcp.send",
+      "params": {
+        "data": "${zero_command}",
+        "encoding": "ascii",
+        "wait_ack": true,
+        "ack_timeout": "${timeout_ms}",
+        "ack_size": "${receive_size}",
+        "ack_pattern": "^[A-Z]{1,3}.*"
+      }
+    }
+  ],
+  "output": {
+    "weight": "${steps.parse_weight.result}",
+    "unit": "${steps.parse_unit.result}",
+    "decimals": 3,
+    "stability": "${steps.parse_status.result}",
+    "raw_payload": "${steps.read_resp.result.payload}",
+    "transport": "tcp",
+    "protocol": "mt-sics"
   }
 }
 ```

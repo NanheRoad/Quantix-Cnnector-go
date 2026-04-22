@@ -246,6 +246,50 @@
 
 - [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)（第 5 节）
 
+### MT-SICS TCP 低延迟模板
+
+适用说明：
+
+- 适配梅特勒托利多 MT-SICS 协议台秤/天平的 TCP Server 模式
+- 推荐用于低延迟轮询场景
+- 默认读取命令使用 `SIU`，优先获取当前单位的即时重量，不等待稳定
+
+推荐连接参数：
+
+```json
+{
+  "host": "192.168.3.22",
+  "port": 9761
+}
+```
+
+推荐模板变量：
+
+```json
+{
+  "read_command": "SIU\r\n",
+  "tare_command": "T\r\n",
+  "zero_command": "Z\r\n",
+  "receive_size": 64,
+  "timeout_ms": 80
+}
+```
+
+推荐设备参数：
+
+```json
+{
+  "device_category": "weight",
+  "poll_interval": 0.05
+}
+```
+
+建议：
+
+- 追求极低延迟时，`poll_interval` 建议从 `0.05` 秒开始压测
+- 若现场网络稳定，可进一步试 `0.03` 秒
+- 若串口调试助手偶发乱码，通常是编码显示或拆包问题；TCP 模板按 ASCII 文本解析，稳定性更好
+
 ## 9. 奥豪斯 Navigator 模板
 
 适用说明：

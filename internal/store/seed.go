@@ -77,81 +77,39 @@ func systemTemplates() []ProtocolTemplate {
 			}`),
 		},
 		{
-			Name:         "TSC-Serial-Print",
-			Description:  "TSC serial print template",
-			ProtocolType: "serial",
-			IsSystem:     true,
-			Template: mustJSONMap(`{
-				"name":"TSC-Serial-Print",
-				"protocol_type":"serial",
-				"variables":[
-					{"name":"print_data","type":"string","default":"SIZE 40 mm,30 mm\\nTEXT 20,20,\\\"3\\\",0,1,1,\\\"TEST\\\"\\nPRINT 1\\n","label":"Print Data"},
-					{"name":"ack_timeout","type":"int","default":600,"label":"ACK Timeout ms"},
-					{"name":"job_id","type":"string","default":"manual-job","label":"Job ID"}
-				],
-				"steps":[
-					{"id":"print_send","name":"Send","trigger":"manual","action":"serial.send","params":{"data":"${print_data}"}},
-					{"id":"print_ack","name":"Read ACK","trigger":"manual","action":"serial.receive","params":{"size":128,"timeout":"${ack_timeout}","delimiter":"\\n"},"parse":{"type":"regex","pattern":"OK|ACK|DONE","group":0}}
-				],
-				"output":{"print_ack":"${steps.print_ack.result}","job_id":"${job_id}"}
-			}`),
-		},
-		{
-			Name:         "TSC-TCP-Print",
-			Description:  "TSC tcp print template",
+			Name:         "MT-SICS-TCP-Scale",
+			Description:  "Mettler Toledo SICS scale over TCP",
 			ProtocolType: "tcp",
 			IsSystem:     true,
 			Template: mustJSONMap(`{
-				"name":"TSC-TCP-Print",
+				"name":"MT-SICS-TCP-Scale",
+				"description":"Mettler Toledo SICS scale over TCP; optimized for low-latency polling with SIU command",
 				"protocol_type":"tcp",
 				"variables":[
-					{"name":"print_data","type":"string","default":"SIZE 40 mm,30 mm\\nTEXT 20,20,\\\"3\\\",0,1,1,\\\"TEST\\\"\\nPRINT 1\\n","label":"Print Data"},
-					{"name":"ack_timeout","type":"int","default":600,"label":"ACK Timeout ms"},
-					{"name":"job_id","type":"string","default":"manual-job","label":"Job ID"}
+					{"name":"read_command","type":"string","default":"SIU\\r\\n","label":"Read Command"},
+					{"name":"tare_command","type":"string","default":"T\\r\\n","label":"Tare Command"},
+					{"name":"zero_command","type":"string","default":"Z\\r\\n","label":"Zero Command"},
+					{"name":"receive_size","type":"int","default":64,"label":"Receive Size"},
+					{"name":"timeout_ms","type":"int","default":80,"label":"Timeout ms"},
+					{"name":"line_pattern","type":"string","default":"^[A-Z]{1,3}\\s+([A-Z])\\s+([-+]?[0-9]+(?:\\\\.[0-9]+)?)\\s+([A-Za-z]+)","label":"SICS Line Pattern"}
 				],
 				"steps":[
-					{"id":"print_send","name":"Send","trigger":"manual","action":"tcp.send","params":{"data":"${print_data}","wait_ack":true,"ack_timeout":"${ack_timeout}","ack_pattern":"OK|ACK|DONE"}}
+					{"id":"send_read","name":"Send SIU","trigger":"poll","action":"tcp.send","params":{"data":"${read_command}","encoding":"ascii"}},
+					{"id":"read_resp","name":"Read SICS Response","trigger":"poll","action":"tcp.receive","params":{"size":"${receive_size}","timeout":"${timeout_ms}"}},
+					{"id":"parse_status","name":"Parse Status","trigger":"poll","action":"transform.regex_extract","params":{"input":"${steps.read_resp.result.payload}","pattern":"${line_pattern}","group":1}},
+					{"id":"parse_weight","name":"Parse Weight","trigger":"poll","action":"transform.regex_extract","params":{"input":"${steps.read_resp.result.payload}","pattern":"${line_pattern}","group":2},"parse":{"type":"expression","expression":"float(payload)"}},
+					{"id":"parse_unit","name":"Parse Unit","trigger":"poll","action":"transform.regex_extract","params":{"input":"${steps.read_resp.result.payload}","pattern":"${line_pattern}","group":3}},
+					{"id":"tare","name":"Tare","trigger":"manual","action":"tcp.send","params":{"data":"${tare_command}","encoding":"ascii","wait_ack":true,"ack_timeout":"${timeout_ms}","ack_size":"${receive_size}","ack_pattern":"^[A-Z]{1,3}.*"}},
+					{"id":"zero","name":"Zero","trigger":"manual","action":"tcp.send","params":{"data":"${zero_command}","encoding":"ascii","wait_ack":true,"ack_timeout":"${timeout_ms}","ack_size":"${receive_size}","ack_pattern":"^[A-Z]{1,3}.*"}}
 				],
-				"output":{"print_ack":"${steps.print_send.result.ack_ok}","job_id":"${job_id}"}
-			}`),
-		},
-		{
-			Name:         "Serial-Scanner-LineMode",
-			Description:  "Serial scanner line mode",
-			ProtocolType: "serial",
-			IsSystem:     true,
-			Template: mustJSONMap(`{
-				"name":"Serial-Scanner-LineMode",
-				"protocol_type":"serial",
-				"variables":[
-					{"name":"delimiter","type":"string","default":"\\n","label":"Delimiter"},
-					{"name":"symbology","type":"string","default":"unknown","label":"Symbology"},
-					{"name":"dedupe_window_ms","type":"int","default":500,"label":"Dedup Window"}
-				],
-				"steps":[
-					{"id":"scan_line","name":"Read Line","trigger":"poll","action":"serial.receive","params":{"max_bytes":128,"timeout":300,"delimiter":"${delimiter}"},"parse":{"type":"regex","pattern":"([A-Za-z0-9_\\\\-.]+)","group":1}}
-				],
-				"output":{"barcode":"${steps.scan_line.result}","symbology":"${symbology}"}
-			}`),
-		},
-		{
-			Name:         "Serial-Board-Polling",
-			Description:  "Serial board polling template",
-			ProtocolType: "serial",
-			IsSystem:     true,
-			Template: mustJSONMap(`{
-				"name":"Serial-Board-Polling",
-				"protocol_type":"serial",
-				"variables":[
-					{"name":"poll_cmd","type":"string","default":"READ\\r\\n","label":"Poll Command"},
-					{"name":"delimiter","type":"string","default":"\\n","label":"Delimiter"},
-					{"name":"unit","type":"string","default":"kg","label":"Unit"}
-				],
-				"steps":[
-					{"id":"send_poll","name":"Send Poll","trigger":"poll","action":"serial.send","params":{"data":"${poll_cmd}"}},
-					{"id":"read_resp","name":"Read Response","trigger":"poll","action":"serial.receive","params":{"size":128,"timeout":350,"delimiter":"${delimiter}"},"parse":{"type":"regex","pattern":"([0-9.]+)","group":1}}
-				],
-				"output":{"board_value":"${steps.read_resp.result}","board_status":"online","alarm":false,"unit":"${unit}"}
+				"output":{
+					"weight":"${steps.parse_weight.result}",
+					"unit":"${steps.parse_unit.result}",
+					"stability":"${steps.parse_status.result}",
+					"raw_payload":"${steps.read_resp.result.payload}",
+					"transport":"tcp",
+					"protocol":"mt-sics"
+				}
 			}`),
 		},
 	}

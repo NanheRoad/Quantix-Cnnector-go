@@ -2,6 +2,12 @@
 
 Go 后端 + HTML/JS 前端的工业设备连接器，提供称重、打印、扫码、看板和串口调试能力，支持 Windows/macOS 部署。
 
+
+```bash
+go run ./cmd/server
+```
+
+
 ## 1. 功能概览
 
 - 设备管理：创建设备、编辑设备、启停、删除、连接测试
@@ -175,3 +181,32 @@ node --check web/static/js/app.js
 - 对称重设备设置毫秒级采集间隔前，先评估 CPU/网络/设备响应上限
 - 打印/扫码/看板分别做压力与异常恢复测试
 - 所有上线前变更先在测试设备演练回退
+
+## 10. Windows 编译说明（无命令行窗口 + 高清图标）
+
+### 前置要求
+
+- 已安装 Go
+- 已安装 `go-winres`
+- 图标文件存在：`build/windows/quantix.ico`
+  - 建议该 ico 内包含多尺寸（至少含 `256x256`）以保证高清显示
+
+### 编译命令（PowerShell）
+
+```powershell
+go-winres simply --arch amd64 --in winres/winres.json --manifest
+$env:GOOS="windows"; $env:GOARCH="amd64"; go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/quantix-server.exe cmd/server/main.go
+```
+
+### Makefile 快捷命令
+
+```powershell
+make build-windows-gui
+```
+
+### 编译参数说明
+
+- `-trimpath`：移除文件系统路径，减小二进制大小
+- `-ldflags "-s -w"`：去除调试信息和符号表，减小文件大小
+- `-H=windowsgui`：隐藏命令行窗口，作为后台服务运行
+- `go-winres`：嵌入 Windows 资源（图标、版本信息等）
