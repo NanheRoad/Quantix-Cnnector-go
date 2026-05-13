@@ -153,6 +153,102 @@ main {
   white-space: nowrap;
 }
 
+.print-mode-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+
+.print-mode {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--sec);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.print-mode span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.print-mode strong {
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.remote-print-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.copy-field {
+  margin-bottom: 10px;
+}
+
+.copy-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.copy-line input + input {
+  grid-column: 1 / -1;
+}
+
+.compact-pre {
+  min-height: 174px;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 0;
+}
+
+.remote-print-board h4 {
+  margin-top: 0;
+}
+
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+
+.channel-item {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.channel-item .label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.channel-item .value {
+  display: block;
+  min-height: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "SFMono-Regular", "Consolas", "Menlo", monospace;
+}
+
 label {
   display: block;
   margin: 4px 0 8px;
@@ -505,7 +601,10 @@ pre {
   }
   #tabs { justify-content: flex-start; }
   .grid-2,
-  .grid-3 {
+  .grid-3,
+  .channel-grid,
+  .print-mode-strip,
+  .remote-print-board {
     grid-template-columns: 1fr;
   }
   .status-grid {

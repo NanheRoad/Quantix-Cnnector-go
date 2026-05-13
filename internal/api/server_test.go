@@ -47,6 +47,27 @@ func TestProtectedAPIKey(t *testing.T) {
 	_ = resp2.Body.Close()
 }
 
+func TestRemotePrintJobValidation(t *testing.T) {
+	ts, _, cfg := newTestServer(t)
+
+	status, body := postJSON(t, ts.URL+"/api/remote-print/jobs", "", map[string]any{
+		"template_code": "label_shipping",
+	})
+	if status != http.StatusUnauthorized {
+		t.Fatalf("remote print without key expected 401, got %d, body=%s", status, string(body))
+	}
+
+	status, body = postJSON(t, ts.URL+"/api/remote-print/jobs", cfg.APIKey, map[string]any{
+		"job_code": "JOB-TEST-001",
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("remote print missing template_code expected 400, got %d, body=%s", status, string(body))
+	}
+	if !strings.Contains(string(body), "template_code") {
+		t.Fatalf("expected template_code validation message, body=%s", string(body))
+	}
+}
+
 func TestDeviceByCodeAndDisabledExecute(t *testing.T) {
 	ts, _, cfg := newTestServer(t)
 

@@ -62,6 +62,7 @@ func (s *Server) Router() *gin.Engine {
 	s.registerCategoryRoutes(protected)
 	s.registerSerialDebugRoutes(protected)
 	s.registerPrintAgentRoutes(protected)
+	s.registerRemotePrintRoutes(protected)
 	s.registerLocalFileRoutes(protected)
 	return r
 }

@@ -242,7 +242,174 @@
 }
 ```
 
-模板全文见：
+### 梅特勒托利多串口通用模板
+
+完整JSON模板：
+
+```json
+{
+  "name": "梅特勒托利多-串口-MT-SICS",
+  "description": "适用于梅特勒托利多天平/台秤 MT-SICS 串口协议，支持轮询读取重量、去皮、清零",
+  "protocol_type": "serial",
+  "variables": [
+    {
+      "name": "read_command",
+      "type": "string",
+      "default": "SI\\r\\n",
+      "label": "读取命令"
+    },
+    {
+      "name": "tare_command",
+      "type": "string",
+      "default": "T\\r\\n",
+      "label": "去皮命令"
+    },
+    {
+      "name": "zero_command",
+      "type": "string",
+      "default": "Z\\r\\n",
+      "label": "清零命令"
+    },
+    {
+      "name": "receive_size",
+      "type": "int",
+      "default": 128,
+      "label": "接收字节数"
+    },
+    {
+      "name": "timeout_ms",
+      "type": "int",
+      "default": 1200,
+      "label": "超时时间(ms)"
+    },
+    {
+      "name": "line_pattern",
+      "type": "string",
+      "default": "[A-Z]{1,3}\\s+([A-Z+-])\\s+([-+]?[0-9]+(?:\\.[0-9]+)?)\\s*([A-Za-z]+)?",
+      "label": "MT-SICS响应正则"
+    }
+  ],
+  "steps": [
+    {
+      "id": "send_query",
+      "name": "发送读取命令",
+      "trigger": "poll",
+      "action": "serial.send",
+      "params": {
+        "data": "${read_command}",
+        "encoding": "ascii"
+      }
+    },
+    {
+      "id": "wait_response",
+      "name": "等待响应",
+      "trigger": "poll",
+      "action": "delay",
+      "params": {
+        "milliseconds": 120
+      }
+    },
+    {
+      "id": "read_response",
+      "name": "读取响应数据",
+      "trigger": "poll",
+      "action": "serial.receive",
+      "params": {
+        "size": "${receive_size}",
+        "timeout": "${timeout_ms}",
+        "delimiter": "\\r\\n"
+      }
+    },
+    {
+      "id": "parse_status",
+      "name": "解析稳定状态",
+      "trigger": "poll",
+      "action": "transform.regex_extract",
+      "params": {
+        "input": "${steps.read_response.result.payload}",
+        "pattern": "${line_pattern}",
+        "group": 1
+      }
+    },
+    {
+      "id": "parse_weight",
+      "name": "解析重量",
+      "trigger": "poll",
+      "action": "transform.regex_extract",
+      "params": {
+        "input": "${steps.read_response.result.payload}",
+        "pattern": "${line_pattern}",
+        "group": 2
+      },
+      "parse": {
+        "type": "expression",
+        "expression": "float(payload)"
+      }
+    },
+    {
+      "id": "parse_unit",
+      "name": "解析单位",
+      "trigger": "poll",
+      "action": "transform.regex_extract",
+      "params": {
+        "input": "${steps.read_response.result.payload}",
+        "pattern": "${line_pattern}",
+        "group": 3
+      }
+    },
+    {
+      "id": "tare",
+      "name": "去皮",
+      "trigger": "manual",
+      "action": "serial.send",
+      "params": {
+        "data": "${tare_command}",
+        "encoding": "ascii"
+      }
+    },
+    {
+      "id": "zero",
+      "name": "清零",
+      "trigger": "manual",
+      "action": "serial.send",
+      "params": {
+        "data": "${zero_command}",
+        "encoding": "ascii"
+      }
+    }
+  ],
+  "output": {
+    "weight": "${steps.parse_weight.result}",
+    "unit": "${steps.parse_unit.result}",
+    "stability": "${steps.parse_status.result}",
+    "raw_payload": "${steps.read_response.result.payload}",
+    "transport": "serial",
+    "protocol": "mt-sics"
+  },
+  "recommended_connection_params": {
+    "port": "COM1",
+    "baudrate": 9600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1,
+    "timeout": 1.0
+  },
+  "recommended_device_params": {
+    "device_category": "weight",
+    "poll_interval": 0.2
+  }
+}
+```
+
+模板说明：
+
+- **无需改代码**：不使用 `convert.to_number`，重量转换通过 `parse.expression` 的 `float(payload)` 完成
+- **串口接收参数**：当前后端使用 `timeout`，模板变量仍保留 `timeout_ms` 方便配置
+- **解析兼容性**：正则不锚定行首，可兼容前导空格、回显或控制字符；原始响应输出为 `raw_payload`
+- **手动控制**：`T` 去皮和 `Z` 清零放在 `steps` 中，并使用 `trigger: "manual"`
+- **推荐轮询间隔**：0.2秒（可根据需要调整）
+
+更多历史模板参考：
 
 - [legacy-device-templates-full.md](/Users/n/Code/Quantix-Cnnector-go/docs/legacy-device-templates-full.md)（第 5 节）
 

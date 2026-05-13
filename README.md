@@ -43,13 +43,14 @@ go run ./cmd/server
 
 默认地址：
 
-- 后端：`http://127.0.0.1:8000`
-- 前端：`http://127.0.0.1:8000`（由后端静态托管）
+- 后端：默认监听 `0.0.0.0:8000`，允许局域网访问
+- 本机访问：`http://127.0.0.1:8000`
+- 局域网访问：`http://<本机局域网IP>:8000`
 
 ## 4. 配置项（环境变量）
 
 - `API_KEY`：默认 `quantix-dev-key`
-- `BACKEND_HOST`：默认 `127.0.0.1`
+- `BACKEND_HOST`：默认 `0.0.0.0`
 - `BACKEND_PORT`：默认 `8000`
 - `DB_TYPE`：默认 `sqlite`
 - `DB_NAME`：默认 `quantix.db`
@@ -102,6 +103,7 @@ go run ./cmd/server
 
 - Quantix 服务端创建打印任务
 - 本地连接器轮询任务
+- 远程系统直连本地连接器提交打印任务
 - 本机调用 BarTender 2022 打印 `.btw` 模板
 
 推荐做法：
@@ -146,6 +148,40 @@ go run ./cmd/server
 ```
 
 连接器会在本地把任务映射到对应 `.btw` 模板并执行打印。
+
+云打印支持双通道：
+
+- 拉取模式：本地连接器主动请求远程服务端 `/api/print-jobs/next` 拉取任务。
+- 直连模式：远程系统调用本地连接器 `POST /api/remote-print/jobs` 立即打印。
+
+直连打印示例：
+
+```http
+POST /api/remote-print/jobs
+X-API-Key: <connector_api_key>
+Content-Type: application/json
+```
+
+```json
+{
+  "job_code": "JOB-20260512-001",
+  "job_type": "bartender",
+  "template_code": "material_label_v1",
+  "printer_name": "",
+  "copies": 1,
+  "payload": {
+    "品名": "阿莫西林",
+    "批号": "20260407001",
+    "barcode": "MAT00120260407001"
+  }
+}
+```
+
+直连模式复用云打印页签里的 `template_code -> 本地 .btw 路径` 映射、默认打印机、BarTender 路径和 `max_concurrent_jobs` 并发限制。生产环境开放直连接口时建议放在局域网、VPN 或内网穿透后面，并配置强 API Key。
+
+远程直连打印对接文档：
+
+- [docs/remote-direct-print.md](docs/remote-direct-print.md)
 
 ## 7. Modbus TCP 本地联调
 

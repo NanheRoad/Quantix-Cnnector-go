@@ -1,9 +1,19 @@
 # 云打印接口文档
 
-本文档描述 Quantix Connector 的云打印能力，分为两部分：
+本文档描述 Quantix Connector 的云打印能力，分为三部分：
 
 1. 本地 Connector 对外提供的云打印管理接口（`/api/print-agent/*`）
-2. Connector 作为打印代理，向云端 Quantix 服务调用的任务接口（`/api/print-jobs/*`）
+2. 本地 Connector 对外提供的远程直连打印接口（`/api/remote-print/*`）
+3. Connector 作为打印代理，向云端 Quantix 服务调用的任务接口（`/api/print-jobs/*`）
+
+云打印支持双通道同时存在：
+
+- 拉取模式：Connector 主动请求云端 `/api/print-jobs/next`，适合内网、门店、车间和离线恢复。
+- 直连模式：远程系统主动调用 Connector `/api/remote-print/jobs`，适合同局域网、VPN、专线或内网穿透。
+
+两种模式复用同一套本地配置：`template_mappings`、默认打印机、BarTender 可执行文件路径、`max_concurrent_jobs` 并发限制和最近任务记录。
+
+远程直连打印的独立对接指南见：[remote-direct-print.md](remote-direct-print.md)。
 
 ## 1. 认证与通用约定
 
@@ -165,6 +175,87 @@ Base URL 示例：`http://127.0.0.1:8000`
 ```json
 { "ok": true }
 ```
+
+### 2.7 远程直连提交打印任务
+
+- 方法与路径：`POST /api/remote-print/jobs`
+- 说明：远程系统直接调用本地 Connector 执行一次 BarTender 打印，不经过云端任务队列。
+- 认证：使用本地 Connector API Key，即 `X-API-Key` 或 `?api_key=`。
+- 执行方式：同步执行。接口会等待本地 BarTender 执行结束后返回成功或失败结果。
+- 并发控制：直连打印和拉取打印共用 `max_concurrent_jobs` 限制，避免两条通道同时过量启动 BarTender。
+
+请求体：
+
+```json
+{
+  "job_code": "JOB-20260512-001",
+  "job_type": "bartender",
+  "template_code": "label_shipping",
+  "printer_name": "ZDesigner ZT410",
+  "copies": 1,
+  "payload": {
+    "sku": "ABC-001",
+    "lot": "L20260512",
+    "qty": "10"
+  }
+}
+```
+
+字段说明：
+
+- `job_code`: 可选。为空时 Connector 会生成 `DIRECT-...` 编码。
+- `job_type`: 可选，当前支持 `bartender`，为空时使用代理配置的 `job_type`。
+- `template_code`: 必填。必须能在本地 `template_mappings` 中找到对应 `.btw` 文件。
+- `printer_name`: 可选。为空时使用 `default_printer_name`。
+- `copies`: 可选。`<=0` 时按 `1` 处理。
+- `payload`: 可选。每个键值会映射为 BTXML 的 `NamedSubString`。
+
+打印成功响应：
+
+```json
+{
+  "ok": true,
+  "status": "success",
+  "message": "print completed",
+  "job": {
+    "time": "2026-05-12T10:00:00Z",
+    "job_id": 0,
+    "job_code": "JOB-20260512-001",
+    "template_code": "label_shipping",
+    "printer_name": "ZDesigner ZT410",
+    "status": "success",
+    "message": "print completed",
+    "result": {
+      "template_path": "D:\\labels\\shipping.btw",
+      "printer_name": "ZDesigner ZT410",
+      "copies": 1,
+      "bartender_exe": "C:\\Program Files\\Seagull\\BarTender 2022\\BarTend.exe",
+      "output": ""
+    }
+  }
+}
+```
+
+打印失败响应仍为 `200 OK`，但 `ok=false`，方便调用方拿到本地执行结果：
+
+```json
+{
+  "ok": false,
+  "status": "failed",
+  "message": "template mapping not found: label_shipping",
+  "job": {
+    "job_code": "JOB-20260512-001",
+    "template_code": "label_shipping",
+    "status": "failed",
+    "message": "template mapping not found: label_shipping",
+    "result": {
+      "template_code": "label_shipping"
+    }
+  }
+}
+```
+
+参数错误，例如缺少 `template_code`，返回 `400 Bad Request`。
 
 ## 3. 代理对云端任务接口契约（Connector 调用）
 

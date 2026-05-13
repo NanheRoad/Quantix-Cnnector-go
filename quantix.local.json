@@ -1,14 +1,3 @@
-{
-  "api_key": "",
-  "print_agent": {
-    "enabled": true,
-    "server_url": "http://192.168.18.196:8050",
-    "agent_api_key": "quantix-print-2026",
-    "client_id": "TSC",
-    "job_type": "bartender",
-    "default_printer_name": "",
-    "bartender_executable": "",
-    "poll_interval_ms": 2000,
-    "template_mappings": {}
-  }
+﻿{
+    "api_key":  ""
 }

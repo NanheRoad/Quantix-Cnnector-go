@@ -1359,6 +1359,105 @@ function applyTemplateMapping() {
   }
 }
 
+function fillRemotePrintExample() {
+  const templateCode = el('print-agent-template-code').value.trim() || 'material_label_v1';
+  el('remote-print-template-code').value = templateCode;
+  el('remote-print-job-code').value = `DIRECT-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}`;
+  el('remote-print-copies').value = 1;
+  el('remote-print-printer-name').value = el('print-agent-default-printer').value.trim();
+  el('remote-print-payload').value = pretty({
+    品名: '阿莫西林',
+    批号: '20260407001',
+    barcode: 'MAT00120260407001',
+  });
+  el('remote-print-result').textContent = '';
+  el('remote-print-response').textContent = '暂无直连测试结果';
+  renderRemotePrintGuide();
+}
+
+function remotePrintPayloadFromInputs() {
+  return {
+    job_code: el('remote-print-job-code').value.trim(),
+    job_type: 'bartender',
+    template_code: el('remote-print-template-code').value.trim(),
+    printer_name: el('remote-print-printer-name').value.trim(),
+    copies: Number(el('remote-print-copies').value || 1),
+    payload: safeParseJSON(el('remote-print-payload').value, {}),
+  };
+}
+
+function buildRemotePrintRequestExample() {
+  const body = pretty(remotePrintPayloadFromInputs());
+  return [
+    'POST /api/remote-print/jobs HTTP/1.1',
+    `Host: ${location.host}`,
+    `X-API-Key: ${API_KEY}`,
+    'Content-Type: application/json',
+    '',
+    body,
+  ].join('\n');
+}
+
+function renderRemotePrintGuide() {
+  const endpoint = `${BASE}/api/remote-print/jobs`;
+  el('remote-print-endpoint').value = endpoint;
+  el('remote-print-api-key').value = API_KEY;
+  el('remote-print-request-example').textContent = buildRemotePrintRequestExample();
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  document.execCommand('copy');
+  area.remove();
+}
+
+async function copyRemotePrintURL() {
+  await copyTextToClipboard(el('remote-print-endpoint').value);
+  el('remote-print-result').className = 'ok';
+  el('remote-print-result').textContent = '请求地址已复制';
+}
+
+async function copyRemotePrintExample() {
+  await copyTextToClipboard(el('remote-print-request-example').textContent);
+  el('remote-print-result').className = 'ok';
+  el('remote-print-result').textContent = '请求示例已复制';
+}
+
+async function submitRemotePrintJob() {
+  try {
+    const payload = {
+      job_code: el('remote-print-job-code').value.trim(),
+      job_type: 'bartender',
+      template_code: el('remote-print-template-code').value.trim(),
+      printer_name: el('remote-print-printer-name').value.trim(),
+      copies: Number(el('remote-print-copies').value || 1),
+      payload: parseJSONOrThrow(el('remote-print-payload').value, '直连测试 Payload'),
+    };
+    const result = await api('/api/remote-print/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    el('remote-print-result').className = result.ok ? 'ok' : 'err';
+    el('remote-print-result').textContent = result.ok ? '直连打印成功' : `直连打印失败: ${result.message || '-'}`;
+    el('remote-print-response').textContent = pretty(result);
+    await refreshPrintAgent(true);
+  } catch (e) {
+    el('remote-print-result').className = 'err';
+    el('remote-print-result').textContent = `提交失败: ${e.message}`;
+  }
+}
+
 async function createProtocol() {
   try {
     const payload = { ...getProtocolPayload('new'), is_system: false };
@@ -1593,6 +1692,22 @@ function bindEvents() {
   el('print-agent-bartender-browse').addEventListener('click', browseBarTenderExecutable);
   el('print-agent-template-browse').addEventListener('click', browseTemplateFile);
   el('print-agent-template-apply').addEventListener('click', applyTemplateMapping);
+  el('remote-print-submit').addEventListener('click', submitRemotePrintJob);
+  el('remote-print-fill-example').addEventListener('click', fillRemotePrintExample);
+  el('remote-print-copy-url').addEventListener('click', copyRemotePrintURL);
+  el('remote-print-copy-example').addEventListener('click', copyRemotePrintExample);
+  [
+    'remote-print-job-code',
+    'remote-print-template-code',
+    'remote-print-copies',
+    'remote-print-printer-name',
+    'remote-print-payload',
+  ].forEach(id => {
+    const node = el(id);
+    if (!node) return;
+    node.addEventListener('input', renderRemotePrintGuide);
+    node.addEventListener('change', renderRemotePrintGuide);
+  });
   [
     'print-agent-enabled',
     'print-agent-server-url',
@@ -1622,6 +1737,7 @@ function bindEvents() {
 async function boot() {
   setupTabs();
   bindEvents();
+  renderRemotePrintGuide();
   initProtocolEditors();
   await loadProtocolOptions();
   await refreshDashboardFallback();

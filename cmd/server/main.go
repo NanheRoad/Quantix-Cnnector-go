@@ -100,7 +100,7 @@ func main() {
 		trayapp.RequestQuit()
 	}()
 
-	frontendURL := fmt.Sprintf("http://%s", httpServer.Addr)
+	frontendURL := fmt.Sprintf("http://%s:%d", browserHost(cfg.BackendHost), cfg.BackendPort)
 	err = trayapp.Run(trayapp.Options{
 		FrontendURL: frontendURL,
 		LogPath:     logPath,
@@ -122,6 +122,16 @@ func main() {
 
 func itoa(v int) string {
 	return fmt.Sprintf("%d", v)
+}
+
+func browserHost(host string) string {
+	host = strings.TrimSpace(host)
+	switch host {
+	case "", "0.0.0.0", "::":
+		return "127.0.0.1"
+	default:
+		return host
+	}
 }
 
 func setupLogger() string {

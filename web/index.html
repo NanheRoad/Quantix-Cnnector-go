@@ -224,6 +224,62 @@
       </div>
     </div>
     <div class="panel">
+      <h3>远程直连打印</h3>
+      <div class="print-mode-strip">
+        <div class="print-mode active">
+          <span>云端拉取</span>
+          <strong>本机主动取任务</strong>
+        </div>
+        <div class="print-mode active">
+          <span>远程直连</span>
+          <strong>别人直接请求本机打印</strong>
+        </div>
+      </div>
+      <div class="remote-print-board">
+        <div>
+          <h4>给远程系统填写</h4>
+          <div class="copy-field">
+            <label>请求地址</label>
+            <div class="copy-line">
+              <input id="remote-print-endpoint" class="mono" readonly value="/api/remote-print/jobs" />
+              <button id="remote-print-copy-url" type="button" class="btn-sec">复制</button>
+            </div>
+          </div>
+          <div class="copy-field">
+            <label>请求头</label>
+            <div class="copy-line">
+              <input class="mono" readonly value="X-API-Key" />
+              <input id="remote-print-api-key" class="mono" readonly value="" />
+            </div>
+          </div>
+          <div class="muted-box">远程系统能访问这台电脑时，调用这个地址会立即走本机 BarTender 打印；访问不到时继续用云端拉取任务。</div>
+        </div>
+        <div>
+          <h4>请求示例</h4>
+          <pre id="remote-print-request-example" class="compact-pre">等待生成示例</pre>
+        </div>
+      </div>
+      <div class="grid-3">
+        <div><label>任务编号</label><input id="remote-print-job-code" placeholder="留空自动生成" /></div>
+        <div><label>模板编码</label><input id="remote-print-template-code" placeholder="material_label_v1" value="material_label_v1" /></div>
+        <div><label>份数</label><input id="remote-print-copies" type="number" value="1" min="1" /></div>
+      </div>
+      <div><label>打印机名称</label><input id="remote-print-printer-name" placeholder="留空使用默认打印机" /></div>
+      <label>直连测试 Payload(JSON)</label>
+      <textarea id="remote-print-payload" rows="7">{
+  "品名": "阿莫西林",
+  "批号": "20260407001",
+  "barcode": "MAT00120260407001"
+}</textarea>
+      <div class="row">
+        <button id="remote-print-submit" class="btn-pri">提交直连打印</button>
+        <button id="remote-print-fill-example" class="btn-sec">填入示例</button>
+        <button id="remote-print-copy-example" type="button" class="btn-sec">复制示例</button>
+        <span id="remote-print-result"></span>
+      </div>
+      <pre id="remote-print-response">暂无直连测试结果</pre>
+    </div>
+    <div class="panel">
       <h3>最近打印任务</h3>
       <div id="print-agent-jobs"></div>
     </div>

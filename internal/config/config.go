@@ -54,7 +54,7 @@ func Load() Settings {
 		DBPort:                atoi(getenv("DB_PORT", "3306"), 3306),
 		APIKey:                getenv("API_KEY", defaultAPIKey),
 		LogLevel:              getenv("LOG_LEVEL", "INFO"),
-		BackendHost:           getenv("BACKEND_HOST", "127.0.0.1"),
+		BackendHost:           getenv("BACKEND_HOST", "0.0.0.0"),
 		BackendPort:           atoi(getenv("BACKEND_PORT", "8000"), 8000),
 		FrontendHost:          getenv("FRONTEND_HOST", "127.0.0.1"),
 		FrontendPort:          atoi(getenv("FRONTEND_PORT", "8001"), 8001),

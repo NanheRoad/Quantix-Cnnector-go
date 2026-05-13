@@ -75,6 +75,15 @@ type PrintAgentJobRecord struct {
 	Result       map[string]any `json:"result"`
 }
 
+type DirectPrintJob struct {
+	JobCode      string         `json:"job_code"`
+	JobType      string         `json:"job_type"`
+	TemplateCode string         `json:"template_code"`
+	PrinterName  string         `json:"printer_name"`
+	Copies       int            `json:"copies"`
+	Payload      map[string]any `json:"payload"`
+}
+
 type PrintAgentService struct {
 	mu      sync.Mutex
 	cfg     config.PrintAgentSettings
@@ -83,6 +92,7 @@ type PrintAgentService struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	client  *http.Client
+	execSem chan struct{}
 }
 
 func NewPrintAgentService(cfg config.PrintAgentSettings) *PrintAgentService {
@@ -96,7 +106,8 @@ func NewPrintAgentService(cfg config.PrintAgentSettings) *PrintAgentService {
 			JobType:     cfg.JobType,
 			WorkerCount: cfg.MaxConcurrentJobs,
 		},
-		client: &http.Client{Timeout: 30 * time.Second},
+		client:  &http.Client{Timeout: 30 * time.Second},
+		execSem: make(chan struct{}, cfg.MaxConcurrentJobs),
 	}
 }
 
@@ -137,6 +148,7 @@ func (s *PrintAgentService) UpdateConfig(ctx context.Context, cfg config.PrintAg
 	s.status.ClientID = cfg.ClientID
 	s.status.JobType = cfg.JobType
 	s.status.WorkerCount = cfg.MaxConcurrentJobs
+	s.execSem = make(chan struct{}, cfg.MaxConcurrentJobs)
 	cancel := s.cancel
 	done := s.done
 	s.cancel = nil
@@ -232,6 +244,87 @@ func (s *PrintAgentService) TriggerPoll() error {
 	return err
 }
 
+func (s *PrintAgentService) ExecuteDirectJob(ctx context.Context, req DirectPrintJob) (PrintAgentJobRecord, error) {
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if strings.TrimSpace(req.TemplateCode) == "" {
+		return PrintAgentJobRecord{}, fmt.Errorf("template_code is required")
+	}
+	jobType := strings.TrimSpace(req.JobType)
+	if jobType == "" {
+		jobType = cfg.JobType
+	}
+	if jobType == "" {
+		jobType = "bartender"
+	}
+	if !strings.EqualFold(jobType, "bartender") {
+		return PrintAgentJobRecord{}, fmt.Errorf("unsupported job_type: %s", jobType)
+	}
+	jobCode := strings.TrimSpace(req.JobCode)
+	if jobCode == "" {
+		jobCode = fmt.Sprintf("DIRECT-%s", time.Now().UTC().Format("20060102-150405.000000"))
+	}
+	payload := req.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	task := &remotePrintJob{
+		JobCode:      jobCode,
+		TemplateCode: strings.TrimSpace(req.TemplateCode),
+		PrinterName:  strings.TrimSpace(req.PrinterName),
+		Copies:       req.Copies,
+		Payload:      payload,
+	}
+	s.mu.Lock()
+	s.status.CurrentJobCode = task.JobCode
+	s.status.ActiveJobs++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.status.ActiveJobs > 0 {
+			s.status.ActiveJobs--
+		}
+		if strings.TrimSpace(s.status.CurrentJobCode) == strings.TrimSpace(task.JobCode) {
+			s.status.CurrentJobCode = ""
+		}
+		s.mu.Unlock()
+	}()
+	select {
+	case <-ctx.Done():
+		return PrintAgentJobRecord{}, ctx.Err()
+	default:
+	}
+	result, execErr := s.executeTaskLimited(ctx, task, cfg)
+	record := PrintAgentJobRecord{
+		Time:         time.Now(),
+		JobCode:      task.JobCode,
+		TemplateCode: task.TemplateCode,
+		PrinterName:  task.PrinterName,
+		Result:       result,
+	}
+	if execErr != nil {
+		record.Status = "failed"
+		record.Message = execErr.Error()
+		s.pushHistory(record)
+		s.mu.Lock()
+		s.status.FailedCount++
+		s.status.LastErrorAt = time.Now()
+		s.status.LastError = execErr.Error()
+		s.mu.Unlock()
+		return record, execErr
+	}
+	record.Status = "success"
+	record.Message = "print completed"
+	s.pushHistory(record)
+	s.mu.Lock()
+	s.status.SuccessCount++
+	s.status.LastSuccessAt = time.Now()
+	s.status.LastError = ""
+	s.mu.Unlock()
+	return record, nil
+}
+
 func (s *PrintAgentService) loop(ctx context.Context, cfg config.PrintAgentSettings) {
 	interval := time.Duration(cfg.PollIntervalMS) * time.Millisecond
 	if interval < 500*time.Millisecond {
@@ -298,7 +391,7 @@ func (s *PrintAgentService) pollOnce(ctx context.Context, cfg config.PrintAgentS
 		}
 		s.mu.Unlock()
 	}()
-	result, execErr := s.executeTask(task, cfg)
+	result, execErr := s.executeTaskLimited(ctx, task, cfg)
 	if execErr != nil {
 		_ = s.reportFailed(ctx, cfg, task, execErr.Error(), result)
 		s.pushHistory(PrintAgentJobRecord{
@@ -519,6 +612,30 @@ func (s *PrintAgentService) executeTask(task *remotePrintJob, cfg config.PrintAg
 		return result, fmt.Errorf("bartender execute failed: %w", err)
 	}
 	return result, nil
+}
+
+func (s *PrintAgentService) executeTaskLimited(ctx context.Context, task *remotePrintJob, cfg config.PrintAgentSettings) (map[string]any, error) {
+	sem := s.currentExecSem(cfg)
+	select {
+	case sem <- struct{}{}:
+		defer func() { <-sem }()
+	case <-ctx.Done():
+		return map[string]any{"job_code": task.JobCode}, ctx.Err()
+	}
+	return s.executeTask(task, cfg)
+}
+
+func (s *PrintAgentService) currentExecSem(cfg config.PrintAgentSettings) chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.execSem == nil {
+		limit := cfg.MaxConcurrentJobs
+		if limit <= 0 {
+			limit = 1
+		}
+		s.execSem = make(chan struct{}, limit)
+	}
+	return s.execSem
 }
 
 func normalizeAgentCfg(cfg config.PrintAgentSettings) config.PrintAgentSettings {

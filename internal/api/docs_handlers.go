@@ -47,6 +47,7 @@ func (s *Server) openapi(c *gin.Context) {
 			"/api/serial-debug/send":                     gin.H{"post": gin.H{}},
 			"/api/serial-debug/read":                     gin.H{"get": gin.H{}},
 			"/api/serial-debug/logs":                     gin.H{"get": gin.H{}},
+			"/api/remote-print/jobs":                     gin.H{"post": gin.H{"summary": "Direct remote print job"}},
 		},
 	})
 }
