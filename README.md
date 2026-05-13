@@ -227,18 +227,34 @@ node --check web/static/js/app.js
 - 图标文件存在：`build/windows/quantix.ico`
   - 建议该 ico 内包含多尺寸（至少含 `256x256`）以保证高清显示
 
-### 编译命令（PowerShell）
+### 推荐编译命令（PowerShell）
+
+在项目根目录执行：
 
 ```powershell
-go-winres simply --arch amd64 --in winres/winres.json --manifest
+New-Item -ItemType Directory -Force bin | Out-Null
+go-winres simply --arch amd64 --manifest gui --icon build/windows/quantix.ico
 $env:GOOS="windows"; $env:GOARCH="amd64"; go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/quantix-server.exe cmd/server/main.go
 ```
+
+注意：当前 `go-winres simply` 不支持 `--in` 参数，不要写 `--in winres/winres.json`。如果命令输出 `flag provided but not defined: -in`，说明资源生成失败。
+
+### 判断是否编译成功
+
+```powershell
+Test-Path bin/quantix-server.exe
+Get-Item bin/quantix-server.exe | Select-Object FullName,Length,LastWriteTime
+```
+
+`Test-Path` 返回 `True`，并且 `LastWriteTime` 是本次编译时间，才表示 exe 已生成成功。
 
 ### Makefile 快捷命令
 
 ```powershell
 make build-windows-gui
 ```
+
+注意：Windows PowerShell 默认没有 `make`。如果没有安装 Make，直接使用上面的 PowerShell 编译命令即可。
 
 ### 编译参数说明
 

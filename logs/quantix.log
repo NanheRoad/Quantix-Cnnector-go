@@ -178,3 +178,6 @@
 2026/05/13 08:37:36.356730 Quantix server listening on http://127.0.0.1:8000
 2026/05/13 08:53:54.200412 log file: D:\Code\Quantix-Cnnector-go\logs\quantix.log
 2026/05/13 08:53:54.332675 Quantix server listening on http://0.0.0.0:8000
+2026/05/13 09:33:25.920845 shutdown: signal: interrupt
+2026/05/13 09:33:25.938980 tray unavailable: exit status 1
+2026/05/13 09:33:25.938980 fallback to signal mode; press Ctrl+C to exit

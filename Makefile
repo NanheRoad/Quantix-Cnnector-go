@@ -43,10 +43,10 @@ build-mac-arm:
 	GOOS=darwin GOARCH=arm64 go build -o bin/quantix-server-mac-arm cmd/server/main.go
 
 build-windows-gui: build-windows-res
-	GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o bin/quantix-server.exe cmd/server/main.go
+	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/quantix-server.exe cmd/server/main.go
 
 build-windows-res:
-	go-winres simply --manifest
+	go-winres simply --arch amd64 --manifest gui --icon build/windows/quantix.ico
 
 build-all: build-linux build-windows build-mac-arm
 
